@@ -1,0 +1,25 @@
+# Secret — tuyệt đối không đưa vào image
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Môi trường và cache cục bộ (venv được tạo lại trong image)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Không cần ở runtime
+tests/
+evals/
+.git/
+.github/
+*.md
+Dockerfile
+.dockerignore
