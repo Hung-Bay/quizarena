@@ -3,7 +3,7 @@ x-dev-env: &dev-env
   # Docker Desktop trên Windows không chuyển được sự kiện thay đổi file từ ổ Windows vào container,
   # nên cho uvicorn/watchfiles quét định kỳ (polling) để --reload hoạt động.
   WATCHFILES_FORCE_POLLING: "true"
- 
+
 services:
   api:
     command:
@@ -17,7 +17,7 @@ services:
       <<: *dev-env
     volumes:
       - ./backend/app:/app/app:ro      # sửa code trên máy → container tự nạp lại
- 
+
   realtime:
     command:
       - uvicorn
@@ -31,7 +31,7 @@ services:
       HEALTH_URL: http://127.0.0.1:8000/healthz
     volumes:
       - ./backend/app:/app/app:ro
- 
+
   worker:
     environment:
       <<: *dev-env
