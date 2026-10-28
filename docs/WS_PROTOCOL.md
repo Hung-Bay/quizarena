@@ -126,5 +126,3 @@ Lý do từ chối trong `answer.ack` (`reason`): `LATE`, `NOT_ACTIVE`, `ALREADY
 ```json
 { "type": "answer.ack", "v": 1, "seq": 13, "data": { "accepted": false, "reason": "LATE" } }
 ```
-
-

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
 
     # --- Chung ---
     app_env: Literal["dev", "test", "prod"] = "dev"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # --- Kết nối dữ liệu ---
     database_url: SecretStr
@@ -43,8 +44,7 @@ class Settings(BaseSettings):
         if self.app_env == "prod":
             for name in ("database_url", "redis_url", "jwt_secret"):
                 if "change-me" in getattr(self, name).get_secret_value():
-                    raise ValueError(
-                        f"{name.upper()} vẫn là giá trị mẫu 'change-me'")
+                    raise ValueError(f"{name.upper()} vẫn là giá trị mẫu 'change-me'")
         return self
 
 

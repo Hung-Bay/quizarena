@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Đẩy commit mới lên cùng nhánh thì hủy lần chạy cũ đang dở
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Lint + Test (backend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    # Postgres và Redis thật cho test, không giả lập
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: quizarena
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: quizarena
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U quizarena -d quizarena"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+asyncpg://quizarena:ci_password@localhost:5432/quizarena
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-only-secret-khong-dung-o-production-0123456789abcdef
+      REQUIRE_SERVICES: "1" # test cần Postgres/Redis phải CHẠY, không được âm thầm bỏ qua
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Cài thư viện (đúng theo uv.lock)
+        run: uv sync --frozen
+
+      - name: Ruff — lint
+        run: uv run ruff check .
+
+      - name: Ruff — kiểm tra định dạng
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy app alembic
+
+      - name: Migration (upgrade → downgrade -1 → upgrade)
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade -1
+          uv run alembic upgrade head
+
+      - name: Pytest
+        run: uv run pytest --cov=app --cov-report=term-missing
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          push: false
+          tags: quizarena-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  gitleaks:
+    name: Quét secret (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # quét toàn bộ lịch sử commit, không chỉ commit mới nhất
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Chỉ cần GITLEAKS_LICENSE nếu repo thuộc Organization (tài khoản cá nhân thì không)
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

@@ -1,5 +1,5 @@
 name: quizarena
- 
+
 # ---- Phần dùng chung cho 3 service backend (cùng một image, khác `command`) ----
 x-backend: &backend
   build:
@@ -12,7 +12,7 @@ x-backend: &backend
     options:
       max-size: "10m"
       max-file: "3"
- 
+
 services:
   # ------------------------------------------------------------------ Dữ liệu
   postgres:
@@ -36,7 +36,7 @@ services:
         limits:
           memory: 512M
     logging: *default-logging
- 
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -61,22 +61,16 @@ services:
         limits:
           memory: 192M
     logging: *default-logging
- 
+
   # ------------------------------------------------------- Migration (chạy 1 lần)
   migrate:
     <<: *backend
-    # TODO (sau khi khởi tạo Alembic ở ngày 4–5): đổi thành  command: ["alembic", "upgrade", "head"]
-    command:
-      - sh
-      - -c
-      - |
-        if [ -f alembic.ini ]; then alembic upgrade head;
-        else echo "Alembic chưa được khởi tạo, bỏ qua migration."; fi
+    command: ["alembic", "upgrade", "head"]
     restart: "no"
     depends_on:
       postgres: { condition: service_healthy }
     networks: [data]
- 
+
   # ------------------------------------------------------------- Ứng dụng
   api:
     <<: *backend
@@ -91,7 +85,7 @@ services:
       resources:
         limits:
           memory: 256M
- 
+
   realtime:
     <<: *backend
     command: ["uvicorn", "app.main_realtime:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -106,7 +100,7 @@ services:
       resources:
         limits:
           memory: 256M
- 
+
   worker:
     <<: *backend
     command: ["arq", "app.worker.WorkerSettings"]
@@ -121,7 +115,7 @@ services:
       resources:
         limits:
           memory: 256M
- 
+
   # ------------------------------------------------------------- Gateway
   nginx:
     image: nginx:1.27-alpine  # cần >= 1.27.3 cho `server ... resolve` trong upstream
@@ -144,14 +138,14 @@ services:
         limits:
           memory: 64M
     logging: *default-logging
- 
+
 networks:
   edge: {}                    # chỉ nginx
   app: {}                     # nginx ↔ api / realtime / worker
   data:
     internal: true            # postgres, redis: không có đường ra Internet
   # monitoring: {}            # thêm ở Phase 5–6 (Prometheus, Grafana, Loki…)
- 
+
 volumes:
   pgdata:
   redisdata:

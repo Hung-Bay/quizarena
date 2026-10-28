@@ -26,5 +26,4 @@ class WorkerSettings:
     functions = [ping]
     on_startup = startup
     on_shutdown = shutdown
-    redis_settings = RedisSettings.from_dsn(
-        get_settings().redis_url.get_secret_value())
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
