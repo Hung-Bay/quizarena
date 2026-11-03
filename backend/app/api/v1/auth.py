@@ -1,15 +1,26 @@
-"""API xác thực: /auth/register, /auth/login, /auth/refresh."""
+"""API xác thực: /auth/register, /auth/login, /auth/refresh, /auth/logout, /auth/logout-all, /auth/change-password, /auth/me."""
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, Depends, Response
+from fastapi import APIRouter, Cookie, Depends, Request, Response
 from fastapi.responses import JSONResponse
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_session
+from app.api.deps import get_client_ip, get_current_user, get_redis, get_session
 from app.core.config import get_settings
 from app.core.errors import AppError, error_response
-from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest, TokenResponse, UserOut
+from app.models import User
+from app.repositories import user_repository as users
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    LoginRequest,
+    LoginResponse,
+    MessageResponse,
+    RegisterRequest,
+    TokenResponse,
+    UserOut,
+)
 from app.services import auth as auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -18,6 +29,7 @@ REFRESH_COOKIE = "refresh_token"
 REFRESH_COOKIE_PATH = "/api/v1/auth"  # cookie chỉ được gửi tới các endpoint /auth/*
 
 Session = Annotated[AsyncSession, Depends(get_session)]
+RedisClient = Annotated[Redis, Depends(get_redis)]
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
@@ -50,8 +62,17 @@ async def register(body: RegisterRequest, session: Session) -> UserOut:
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest, response: Response, session: Session) -> LoginResponse:
-    result = await auth_service.login(session, email=body.email, password=body.password)
+async def login(
+    request: Request,
+    body: LoginRequest,
+    response: Response,
+    session: Session,
+    redis: RedisClient,
+) -> LoginResponse:
+    client_ip = get_client_ip(request)
+    result = await auth_service.login(
+        session, redis, email=body.email, password=body.password, client_ip=client_ip
+    )
     _set_refresh_cookie(response, result.tokens.refresh_token)
     return LoginResponse(
         access_token=result.tokens.access_token,
@@ -78,3 +99,67 @@ async def refresh(
 
     _set_refresh_cookie(response, issued.refresh_token)
     return TokenResponse(access_token=issued.access_token, expires_in=issued.expires_in)
+
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(
+    request: Request,
+    response: Response,
+    session: Session,
+    redis: RedisClient,
+    refresh_token: Annotated[str | None, Cookie()] = None,
+) -> MessageResponse:
+    auth_header = request.headers.get("Authorization")
+    access_token: str | None = None
+    if auth_header:
+        parts = auth_header.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            access_token = parts[1]
+
+    await auth_service.logout(
+        session, redis, access_token=access_token, refresh_token=refresh_token
+    )
+    _clear_refresh_cookie(response)
+    return MessageResponse(message="Đăng xuất thành công")
+
+
+@router.post("/logout-all", response_model=MessageResponse)
+async def logout_all(
+    response: Response,
+    session: Session,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MessageResponse:
+    await auth_service.logout_all(session, user_id=current_user.id)
+    _clear_refresh_cookie(response)
+    return MessageResponse(message="Đã đăng xuất khỏi tất cả thiết bị")
+
+
+@router.post("/change-password", response_model=MessageResponse)
+async def change_password(
+    body: ChangePasswordRequest,
+    response: Response,
+    session: Session,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> MessageResponse:
+    await auth_service.change_password(
+        session,
+        user=current_user,
+        old_password=body.old_password,
+        new_password=body.new_password,
+    )
+    _clear_refresh_cookie(response)
+    return MessageResponse(message="Đổi mật khẩu thành công")
+
+
+@router.get("/me", response_model=UserOut)
+async def me(
+    session: Session,
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> UserOut:
+    roles = await users.get_roles(session, current_user.id)
+    return UserOut(
+        id=current_user.id,
+        email=current_user.email,
+        display_name=current_user.display_name,
+        roles=roles,
+    )

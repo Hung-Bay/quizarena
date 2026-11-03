@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Permission, Role, User, role_permissions, user_roles
@@ -54,3 +54,23 @@ async def get_permissions(session: AsyncSession, user_id: uuid.UUID) -> list[str
         .order_by(Permission.code)
     )
     return list(rows.scalars())
+
+
+async def increment_token_version(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """Tăng token_version lên 1 để vô hiệu hóa mọi access token cũ (AU-7)."""
+    result = await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(token_version=User.token_version + 1)
+        .returning(User.token_version)
+    )
+    return result.scalar_one()
+
+
+async def update_password(session: AsyncSession, user_id: uuid.UUID, password_hash: str) -> None:
+    """Cập nhật mật khẩu và tăng token_version (AU-7)."""
+    await session.execute(
+        update(User)
+        .where(User.id == user_id)
+        .values(password_hash=password_hash, token_version=User.token_version + 1)
+    )

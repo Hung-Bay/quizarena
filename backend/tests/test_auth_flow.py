@@ -20,6 +20,10 @@ PASSWORD = "Matkhau123"
 REGISTER = "/api/v1/auth/register"
 LOGIN = "/api/v1/auth/login"
 REFRESH = "/api/v1/auth/refresh"
+LOGOUT = "/api/v1/auth/logout"
+LOGOUT_ALL = "/api/v1/auth/logout-all"
+CHANGE_PASSWORD = "/api/v1/auth/change-password"
+ME = "/api/v1/auth/me"
 
 
 # ------------------------------------------------------------------ hạ tầng test
@@ -72,6 +76,34 @@ def refresh_cookie(response) -> SimpleCookie:
 async def post_refresh(client, token):
     # Cookie gửi tay: httpx không gửi cookie `Secure` qua http://, trình duyệt thật thì có.
     return await client.post(REFRESH, headers={"Cookie": f"refresh_token={token}"})
+
+
+async def logout(client, access_token=None, refresh_token=None):
+    headers = {}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    if refresh_token:
+        headers["Cookie"] = f"refresh_token={refresh_token}"
+    return await client.post(LOGOUT, headers=headers)
+
+
+async def logout_all(client, access_token):
+    return await client.post(LOGOUT_ALL, headers={"Authorization": f"Bearer {access_token}"})
+
+
+async def change_password(client, access_token, old_password, new_password):
+    return await client.post(
+        CHANGE_PASSWORD,
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={"old_password": old_password, "new_password": new_password},
+    )
+
+
+async def get_me(client, access_token=None):
+    headers = {}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    return await client.get(ME, headers=headers)
 
 
 async def registered_and_logged_in(client):
@@ -326,3 +358,205 @@ async def test_tai_khoan_bi_khoa_thi_refresh_bi_tu_choi_va_thu_hoi_family(client
         e=email,
     )
     assert row.active == 0
+
+
+# ------------------------------------------------------------------ AU-6: logout + denylist jti
+
+
+async def test_get_me_thanh_cong(client):
+    email, resp, _ = await registered_and_logged_in(client)
+    acc = resp.json()["access_token"]
+    me_resp = await get_me(client, acc)
+    assert me_resp.status_code == 200
+    body = me_resp.json()
+    assert body["email"] == email
+    assert body["roles"] == ["PLAYER"]
+
+
+async def test_get_me_thieu_token_hoac_token_sai(client):
+    no_token = await get_me(client)
+    assert no_token.status_code == 401
+    assert no_token.json()["error"]["code"] == "TOKEN_MISSING"
+
+    bad_header = await client.get(ME, headers={"Authorization": "SaiDinhDang abc"})
+    assert bad_header.status_code == 401
+    assert bad_header.json()["error"]["code"] == "TOKEN_INVALID"
+
+    garbage = await get_me(client, "khong-phai-jwt")
+    assert garbage.status_code == 401
+    assert garbage.json()["error"]["code"] == "TOKEN_INVALID"
+
+
+async def test_logout_dua_jti_vao_denylist_va_access_token_cu_bi_tu_choi(client):
+    _, resp, ref = await registered_and_logged_in(client)
+    acc = resp.json()["access_token"]
+
+    # Đang dùng bình thường
+    assert (await get_me(client, acc)).status_code == 200
+
+    # Đăng xuất
+    out_resp = await logout(client, access_token=acc, refresh_token=ref)
+    assert out_resp.status_code == 200
+    assert out_resp.json()["message"] == "Đăng xuất thành công"
+
+    # Cookie đã bị xóa
+    morsel = refresh_cookie(out_resp)["refresh_token"]
+    assert morsel.value == "" and int(morsel["max-age"]) == 0
+
+    # Token cũ dùng lại ngay lập tức bị từ chối 401 qua denylist Redis (AU-6)
+    me_after = await get_me(client, acc)
+    assert me_after.status_code == 401
+    assert me_after.json()["error"]["code"] == "TOKEN_REVOKED"
+
+    # Refresh token cũ cũng bị thu hồi
+    ref_after = await post_refresh(client, ref)
+    assert ref_after.status_code == 401
+    assert ref_after.json()["error"]["code"] == "REFRESH_TOKEN_INVALID"
+
+
+# ------------------------------------------------------------------ AU-7: logout-all & đổi mật khẩu
+
+
+async def test_logout_all_tang_token_version_va_vo_hieu_moi_token_cu(client, db):
+    email, resp1, ref1 = await registered_and_logged_in(client)
+    acc1 = resp1.json()["access_token"]
+
+    # Đăng nhập thiết bị thứ 2
+    resp2 = await login(client, email)
+    acc2 = resp2.json()["access_token"]
+    ref2 = refresh_cookie(resp2)["refresh_token"].value
+
+    # Gọi logout-all từ thiết bị 1
+    r = await logout_all(client, acc1)
+    assert r.status_code == 200
+    assert r.json()["message"] == "Đã đăng xuất khỏi tất cả thiết bị"
+
+    # Cả hai access token đều bị vô hiệu vì token_version đã tăng (AU-7)
+    assert (await get_me(client, acc1)).status_code == 401
+    assert (await get_me(client, acc2)).status_code == 401
+
+    # Cả hai refresh token đều bị thu hồi
+    assert (await post_refresh(client, ref1)).status_code == 401
+    assert (await post_refresh(client, ref2)).status_code == 401
+
+    # Kiểm tra token_version đã tăng trong DB
+    (row,) = await db("SELECT token_version FROM users WHERE email = :e", e=email)
+    assert row.token_version == 1
+
+    (row_ref,) = await db(
+        "SELECT count(*) FILTER (WHERE revoked_at IS NULL) AS active FROM refresh_tokens t "
+        "JOIN users u ON u.id = t.user_id WHERE u.email = :e",
+        e=email,
+    )
+    assert row_ref.active == 0
+
+
+async def test_doi_mat_khau_thanh_cong_va_vo_hieu_moi_token_cu(client, db):
+    email, resp, ref = await registered_and_logged_in(client)
+    acc = resp.json()["access_token"]
+    new_pass = "MatkhauMoi456"
+
+    # Đổi mật khẩu
+    r = await change_password(client, acc, PASSWORD, new_pass)
+    assert r.status_code == 200
+    assert r.json()["message"] == "Đổi mật khẩu thành công"
+
+    # Access token cũ bị vô hiệu
+    assert (await get_me(client, acc)).status_code == 401
+    # Refresh token cũ bị vô hiệu
+    assert (await post_refresh(client, ref)).status_code == 401
+
+    # Mật khẩu cũ không đăng nhập được nữa
+    assert (await login(client, email, PASSWORD)).status_code == 401
+
+    # Mật khẩu mới đăng nhập thành công
+    login_new = await login(client, email, new_pass)
+    assert login_new.status_code == 200
+
+    # token_version trong DB đã tăng
+    (row,) = await db("SELECT token_version FROM users WHERE email = :e", e=email)
+    assert row.token_version == 1
+
+
+async def test_doi_mat_khau_sai_mat_khau_cu_bi_tu_choi(client):
+    _, resp, _ = await registered_and_logged_in(client)
+    acc = resp.json()["access_token"]
+
+    r = await change_password(client, acc, "SaiMatKhau123", "MatkhauMoi456")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "INVALID_PASSWORD"
+
+
+async def test_doi_mat_khau_trung_mat_khau_cu_bi_tu_choi(client):
+    _, resp, _ = await registered_and_logged_in(client)
+    acc = resp.json()["access_token"]
+
+    r = await change_password(client, acc, PASSWORD, PASSWORD)
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "SAME_PASSWORD"
+
+
+async def test_doi_mat_khau_yeu_bi_tu_choi(client):
+    _, resp, _ = await registered_and_logged_in(client)
+    acc = resp.json()["access_token"]
+
+    r = await change_password(client, acc, PASSWORD, "weak")
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+# ------------------------------------------------------------------ AU-8: chống brute-force
+
+
+async def test_brute_force_sai_5_lan_bi_khoa_tam(client):
+    email, _, _ = await registered_and_logged_in(client)
+
+    # Thử sai 5 lần liên tiếp
+    for i in range(5):
+        resp = await login(client, email, f"SaiMatKhau{i}")
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == "INVALID_CREDENTIALS"
+
+    # Lần thứ 6 bị khóa tạm thời 429
+    blocked = await login(client, email, "SaiMatKhauX")
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "RATE_LIMITED"
+
+    # Dù nhập đúng mật khẩu ở lần sau vẫn bị khóa tạm thời (AU-8)
+    blocked_correct = await login(client, email, PASSWORD)
+    assert blocked_correct.status_code == 429
+    assert blocked_correct.json()["error"]["code"] == "RATE_LIMITED"
+
+
+async def test_brute_force_email_khong_ton_tai_cho_thong_diep_va_hanh_vi_giong_het(client):
+    fake_email = new_email()
+
+    # Thử sai 5 lần với email không tồn tại
+    for i in range(5):
+        resp = await login(client, fake_email, f"SaiMatKhau{i}")
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == "INVALID_CREDENTIALS"
+        assert resp.json()["error"]["message"] == "Email hoặc mật khẩu không đúng"
+
+    # Lần thứ 6 với email không tồn tại cũng bị khóa 429 giống hệt
+    blocked = await login(client, fake_email, "SaiMatKhauX")
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "RATE_LIMITED"
+
+
+async def test_dang_nhap_thanh_cong_xoa_bo_dem_brute_force(client):
+    email, _, _ = await registered_and_logged_in(client)
+
+    # Thử sai 4 lần (< 5)
+    for i in range(4):
+        r = await login(client, email, f"SaiMatKhau{i}")
+        assert r.status_code == 401
+
+    # Lần thứ 5 nhập đúng mật khẩu -> thành công và reset bộ đếm
+    ok = await login(client, email, PASSWORD)
+    assert ok.status_code == 200
+
+    # Lần tiếp theo thử sai -> vẫn trả 401 (chứ không bị khóa 429) vì bộ đếm đã được reset
+    retry_wrong = await login(client, email, "SaiMatKhauMoi")
+    assert retry_wrong.status_code == 401
+    assert retry_wrong.json()["error"]["code"] == "INVALID_CREDENTIALS"

@@ -1,12 +1,15 @@
-"""Nghiệp vụ xác thực: đăng ký, đăng nhập, làm mới token (FR-AUTH-01…05)."""
+"""Nghiệp vụ xác thực: đăng ký, đăng nhập, làm mới token, logout, đổi mật khẩu, chống brute-force (AU-1…8)."""
 
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
+from redis.asyncio import Redis
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import security
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.rbac import RoleName
@@ -24,6 +27,9 @@ from app.repositories import user_repository as users
 from app.schemas.auth import UserOut
 
 log = logging.getLogger("app.auth")
+
+LOGIN_FAIL_LIMIT = 5
+LOGIN_FAIL_TTL = 15 * 60  # 15 phút (900 giây)
 
 
 @dataclass(frozen=True)
@@ -101,16 +107,39 @@ async def register(
     )
 
 
-# ----------------------------------------------------------------------------- đăng nhập (AU-2, AU-3)
+# ----------------------------------------------------------------------------- đăng nhập (AU-2, AU-3, AU-8)
 
 
-async def login(session: AsyncSession, *, email: str, password: str) -> LoginResult:
+async def login(
+    session: AsyncSession, redis: Redis, *, email: str, password: str, client_ip: str
+) -> LoginResult:
+    normalized_email = email.strip().lower()
+    fail_key = f"login_fail:{normalized_email}:{client_ip}"
+
+    # AU-8: Kiểm tra giới hạn thử sai (brute-force)
+    fails = await redis.get(fail_key)
+    if fails is not None and int(fails) >= LOGIN_FAIL_LIMIT:
+        raise AppError(
+            "Tài khoản tạm thời bị khóa do đăng nhập sai nhiều lần. Vui lòng thử lại sau 15 phút.",
+            code="RATE_LIMITED",
+            status_code=429,
+        )
+
     async with session.begin():
-        user = await users.get_by_email(session, email.strip().lower())
+        user = await users.get_by_email(session, normalized_email)
+
     # Băm/kiểm tra mật khẩu NGOÀI transaction để không giữ kết nối DB trong lúc tính toán nặng.
     ok = await verify_password_or_dummy_async(password, user.password_hash if user else None)
     if user is None or not ok:
+        pipe = redis.pipeline()
+        pipe.incr(fail_key)
+        pipe.expire(fail_key, LOGIN_FAIL_TTL)
+        await pipe.execute()
         raise _invalid_credentials()
+
+    # Đăng nhập thành công -> xóa bộ đếm thất bại
+    await redis.delete(fail_key)
+
     if not user.is_active:
         # Chỉ nói "tài khoản bị khóa" khi đã đúng mật khẩu, nên không lộ thông tin cho người lạ
         raise AppError("Tài khoản đã bị khóa", code="ACCOUNT_DISABLED", status_code=403)
@@ -170,3 +199,63 @@ async def refresh(session: AsyncSession, *, raw_token: str) -> AuthTokens:
     # Chỉ ném lỗi SAU khi transaction đã commit: nếu ném bên trong `with`, việc thu hồi family sẽ bị rollback.
     assert failure is not None
     raise failure
+
+
+# ----------------------------------------------------------------------------- đăng xuất & đổi mật khẩu (AU-6, AU-7)
+
+
+async def logout(
+    session: AsyncSession,
+    redis: Redis,
+    *,
+    access_token: str | None,
+    refresh_token: str | None,
+) -> None:
+    """Đăng xuất phiên hiện tại: thu hồi refresh token + đưa jti vào denylist Redis (AU-6)."""
+    if refresh_token:
+        token_hash = hash_token(refresh_token)
+        async with session.begin():
+            await tokens.revoke_if_active(session, token_hash)
+
+    if access_token:
+        try:
+            claims = security.decode_token(access_token, expected_type="access")
+            jti = claims.get("jti")
+            exp = claims.get("exp")
+            if jti and exp:
+                ttl = int(exp - datetime.now(UTC).timestamp())
+                if ttl > 0:
+                    await redis.set(f"deny:jti:{jti}", "1", ex=ttl)
+        except security.TokenError:
+            pass  # Nếu token đã hết hạn hoặc không hợp lệ thì không cần đưa vào denylist
+
+
+async def logout_all(session: AsyncSession, *, user_id: uuid.UUID) -> None:
+    """Đăng xuất mọi thiết bị: thu hồi toàn bộ refresh token + tăng token_version (AU-7)."""
+    async with session.begin():
+        await tokens.revoke_all_for_user(session, user_id)
+        await users.increment_token_version(session, user_id)
+
+
+async def change_password(
+    session: AsyncSession,
+    *,
+    user: User,
+    old_password: str,
+    new_password: str,
+) -> None:
+    """Đổi mật khẩu: kiểm tra mật khẩu cũ, băm mật khẩu mới, tăng token_version và thu hồi refresh tokens (AU-7)."""
+    ok = await verify_password_or_dummy_async(old_password, user.password_hash)
+    if not ok:
+        raise AppError("Mật khẩu hiện tại không đúng", code="INVALID_PASSWORD", status_code=400)
+
+    is_same = await verify_password_or_dummy_async(new_password, user.password_hash)
+    if is_same:
+        raise AppError(
+            "Mật khẩu mới không được trùng mật khẩu cũ", code="SAME_PASSWORD", status_code=400
+        )
+
+    new_hash = await hash_password_async(new_password)
+    async with session.begin():
+        await users.update_password(session, user.id, new_hash)
+        await tokens.revoke_all_for_user(session, user.id)
