@@ -4,9 +4,10 @@
 
 | Phiên bản | Ngày | Tác giả | Thay đổi |
 |---|---|---|---|
-| 0.1 | _<25/10/2026>_ | _<Hùng>_ | Baseline cuối Phase 0: mục 1–3 (giới thiệu, mô tả tổng quan, yêu cầu chức năng). Mục 4–8 để trống, bổ sung ở các phase sau |
+| 0.1 | 25/10/2026 | Hùng | Baseline cuối Phase 0: mục 1–3 (giới thiệu, mô tả tổng quan, yêu cầu chức năng). Mục 4–8 để trống, bổ sung ở các phase sau |
+| 0.2 | 03/11/2026 | Hùng | Cập nhật Phase 1: Thêm sơ đồ trình tự xác thực, refresh rotation, guest token, ws-ticket (Mục 7) và Ma trận truy vết RTM cho Auth/RBAC (Mục 8) |
 
-**Mục lục:** 1. Giới thiệu · 2. Mô tả tổng quan · 3. Yêu cầu chức năng · 4–8 (chưa viết) · Phụ lục A (ma trận quyền) · Phụ lục B (đối chiếu đề bài)
+**Mục lục:** 1. Giới thiệu · 2. Mô tả tổng quan · 3. Yêu cầu chức năng · 4. Yêu cầu giao diện ngoài · 5. Yêu cầu phi chức năng · 6. Yêu cầu dữ liệu · 7. Use case & Sequence Diagrams · 8. Ma trận truy vết (RTM) · Phụ lục A (ma trận quyền) · Phụ lục B (đối chiếu đề bài)
 
 ---
 
@@ -458,15 +459,171 @@ AC: **Given** hệ thống mới triển khai · **When** chạy lệnh tạo ad
 
 ---
 
-## 4–8. (Chưa viết — bổ sung ở các phase sau)
+## 4. Yêu cầu giao diện ngoài (Phase 1)
 
-| Mục | Nội dung | Phase dự kiến |
-|---|---|---|
-| 4 | Yêu cầu giao diện ngoài (wireframe, OpenAPI, WebSocket, SSE, Gemini API) | Phase 1–4 |
-| 5 | Yêu cầu phi chức năng (NFR, mọi mục có con số đo được) | Phase 1 (khung), hoàn thiện Phase 5–6 |
-| 6 | Yêu cầu dữ liệu (ERD, từ điển dữ liệu, thiết kế key Redis, backup) | Phase 1–3 |
-| 7 | Use case và sequence diagram | Phase 1–4 |
-| 8 | Ma trận truy vết (RTM) | Cập nhật mỗi phase, hoàn chỉnh Phase 7 |
+### 4.1. REST API Endpoints (Auth, Join & Realtime Ticket)
+
+| Endpoint | Method | Quyền yêu cầu | Mô tả |
+|---|---|---|---|
+| `/api/v1/auth/register` | POST | Public | Đăng ký tài khoản mới (PLAYER) |
+| `/api/v1/auth/login` | POST | Public | Đăng nhập, nhận Access Token + Cookie Refresh |
+| `/api/v1/auth/refresh` | POST | Public (Cookie) | Làm mới Access Token (xoay vòng Refresh Token) |
+| `/api/v1/auth/logout` | POST | Đã đăng nhập (hoặc Cookie) | Đăng xuất phiên hiện tại, đưa `jti` vào Redis denylist |
+| `/api/v1/auth/logout-all` | POST | Đã đăng nhập | Đăng xuất mọi phiên, tăng `token_version` |
+| `/api/v1/auth/change-password` | POST | Đã đăng nhập | Đổi mật khẩu, tăng `token_version` |
+| `/api/v1/auth/me` | GET | Đã đăng nhập | Lấy thông tin tài khoản và danh sách vai trò |
+| `/api/v1/games/join` | POST | Public (hoặc Đã đăng nhập) | Tham gia phòng chờ qua PIN, cấp Guest Token |
+| `/api/v1/realtime/ws-ticket` | POST | `game:play` / `game:host_own` | Cấp vé một lần để kết nối WebSocket |
+
+---
+
+## 5. Yêu cầu phi chức năng (Phase 1)
+
+- **NFR-SEC-01 (Mật khẩu):** Băm bằng Argon2id theo khuyến nghị RFC 9106. Không lưu mật khẩu gốc hoặc băm thô (MD5/SHA) trong bất kỳ trường hợp nào.
+- **NFR-SEC-02 (Refresh Token Storage):** Database chỉ lưu bản băm SHA-256 (hex) của refresh token.
+- **NFR-SEC-03 (Chống brute-force):** Khóa tạm thời 15 phút nếu sai 5 lần liên tiếp trên cùng cặp (email, IP).
+- **NFR-PERF-01 (Độ trễ API):** REST endpoint kiểm tra quyền qua JWT đạt độ trễ p95 < 200 ms.
+- **NFR-PERF-02 (Thời gian sống ws-ticket):** Vé WebSocket hết hạn sau 30 giây trong Redis.
+
+---
+
+## 6. Yêu cầu dữ liệu (Phase 1)
+
+### 6.1. Bảng cơ sở dữ liệu Postgres
+- `users`: `id` (PK, UUID), `email` (CITEXT, UNIQUE), `password_hash`, `display_name`, `is_active`, `token_version`, `created_at`.
+- `roles`: `id` (PK, UUID), `name` (VARCHAR, UNIQUE).
+- `permissions`: `id` (PK, UUID), `code` (VARCHAR, UNIQUE).
+- `user_roles`: `user_id` (FK `users.id`), `role_id` (FK `roles.id`), PK `(user_id, role_id)`.
+- `role_permissions`: `role_id` (FK `roles.id`), `permission_id` (FK `permissions.id`), PK `(role_id, permission_id)`.
+- `refresh_tokens`: `id` (PK, UUID), `user_id` (FK `users.id`), `family_id` (UUID), `token_hash` (CHAR(64), UNIQUE), `expires_at`, `revoked_at`, `created_at`.
+
+### 6.2. Thiết kế key Redis
+- `deny:jti:{jti}`: String ("1"), TTL = thời gian còn lại của Access Token.
+- `login_fail:{email}:{ip}`: String (số lần thử sai), TTL = 900 giây (15 phút).
+- `ws:ticket:{token}`: String (JSON thông tin định danh), TTL = 30 giây. Đổi vé bằng lệnh `GETDEL`.
+- `pin:{pin}`: String (`game_id`), TTL = 3 giờ.
+
+---
+
+## 7. Use case & Sequence Diagrams (Phase 1)
+
+### 7.1. Đăng ký & Đăng nhập (AU-1, AU-2, AU-3)
+
+```mermaid
+sequenceDiagram
+    participant C as Client (Trình duyệt)
+    participant A as API Server
+    participant DB as Postgres
+    participant R as Redis
+
+    C->>A: POST /auth/login {email, password}
+    A->>R: GET login_fail:{email}:{ip}
+    alt Số lần sai >= 5
+        A-->>C: 429 RATE_LIMITED
+    else Chưa bị khóa
+        A->>DB: SELECT user WHERE email
+        A->>A: verify_password_or_dummy (Argon2id)
+        alt Sai mật khẩu hoặc không có user
+            A->>R: INCR + EXPIRE 900 login_fail:{email}:{ip}
+            A-->>C: 401 INVALID_CREDENTIALS
+        else Mật khẩu đúng
+            A->>R: DEL login_fail:{email}:{ip}
+            A->>DB: INSERT refresh_token (SHA-256, family_id)
+            A-->>C: 200 OK + Body(access_token) + Cookie(refresh_token)
+        end
+    end
+```
+
+### 7.2. Refresh Rotation & Reuse Detection (AU-4, AU-5)
+
+```mermaid
+sequenceDiagram
+    participant C as Client (Trình duyệt)
+    participant A as API Server
+    participant DB as Postgres
+
+    C->>A: POST /auth/refresh (Cookie: refresh_token)
+    A->>DB: UPDATE refresh_tokens SET revoked_at=now() WHERE active
+    alt Token hợp lệ (chưa bị revoke)
+        A->>DB: INSERT refresh_tokens mới (cùng family_id)
+        A-->>C: 200 OK + access_token mới + Cookie refresh mới
+    else Token đã bị revoke trước đó (REUSE DETECTED)
+        A->>DB: UPDATE refresh_tokens SET revoked_at=now() WHERE family_id
+        A-->>C: 401 REFRESH_TOKEN_REUSED (xóa Cookie)
+    end
+```
+
+### 7.3. Đăng xuất & Đổi mật khẩu (AU-6, AU-7)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as API Server
+    participant DB as Postgres
+    participant R as Redis
+
+    Note over C,A: Đăng xuất phiên hiện tại (AU-6)
+    C->>A: POST /auth/logout (Bearer access_token, Cookie refresh)
+    A->>DB: UPDATE refresh_tokens SET revoked_at=now()
+    A->>R: SET deny:jti:{jti} 1 EX remaining_ttl
+    A-->>C: 200 OK + Clear Cookie
+
+    Note over C,A: Đổi mật khẩu / Logout-all (AU-7)
+    C->>A: POST /auth/change-password
+    A->>DB: UPDATE users SET password_hash, token_version = token_version + 1
+    A->>DB: UPDATE refresh_tokens SET revoked_at=now() WHERE user_id
+    A-->>C: 200 OK + Clear Cookie
+```
+
+### 7.4. Tham gia trận & Lấy vé WebSocket (AU-9, AU-11)
+
+```mermaid
+sequenceDiagram
+    participant C as Client (Guest)
+    participant A as API Server
+    participant R as Redis
+    participant WS as WebSocket Replica
+
+    C->>A: POST /games/join {pin, nickname}
+    A->>R: GET pin:{pin}
+    A-->>C: 200 OK + Guest JWT (permissions=["game:play"], game_id, TTL <= 3h)
+
+    C->>A: POST /realtime/ws-ticket {game_id} (Bearer Guest JWT)
+    A->>A: Kiểm tra game:play và game_id khớp
+    A->>R: SET ws:ticket:{ticket} {identity} EX 30
+    A-->>C: 200 OK {ticket, expires_in: 30}
+
+    C->>WS: Kết nối wss://.../ws/game?ticket={ticket}
+    WS->>R: GETDEL ws:ticket:{ticket}
+    alt Vé hợp lệ
+        R-->>WS: identity data (vé bị xóa ngay)
+        WS-->>C: Chấp nhận kết nối WebSocket
+    else Vé hết hạn hoặc dùng lại lần 2
+        R-->>WS: nil
+        WS-->>C: Đóng kết nối (4001 Unauthorized)
+    end
+```
+
+---
+
+## 8. Ma trận truy vết yêu cầu (Traceability Matrix - RTM cho Phase 1)
+
+| Req ID | Mô tả yêu cầu | API / CLI Endpoint | Test Case / Bằng chứng xác minh | Trạng thái |
+|---|---|---|---|:---:|
+| **FR-AUTH-01** | Đăng ký tài khoản (Argon2id, email unique) | `POST /auth/register` | `test_auth_flow.py::test_dang_ky_thanh_cong`<br/>`test_dang_ky_trung_email_khong_phan_biet_hoa_thuong` | ✅ Done |
+| **FR-AUTH-02** | Đăng nhập cấp access token + cookie refresh | `POST /auth/login` | `test_auth_flow.py::test_dang_nhap_tra_access_token_dung_noi_dung`<br/>`test_cookie_refresh_co_dung_4_thuoc_tinh` | ✅ Done |
+| **FR-AUTH-03** | Access Token payload chuẩn AU-3 | `POST /auth/login` | `test_security.py::test_access_token_du_cac_truong_theo_AU3` | ✅ Done |
+| **FR-AUTH-04** | Refresh token rotation (SHA-256, family_id) | `POST /auth/refresh` | `test_auth_flow.py::test_refresh_xoay_vong_va_cung_family`<br/>`test_refresh_token_chi_luu_ban_bam_sha256` | ✅ Done |
+| **FR-AUTH-05** | Reuse detection (thu hồi cả family khi token cũ gửi lại) | `POST /auth/refresh` | `test_auth_flow.py::test_dung_lai_refresh_token_cu_thu_hoi_ca_family` | ✅ Done |
+| **FR-AUTH-06** | Logout đưa `jti` vào Redis denylist | `POST /auth/logout` | `test_auth_flow.py::test_logout_dua_jti_vao_denylist_va_access_token_cu_bi_tu_choi` | ✅ Done |
+| **FR-AUTH-07** | Logout-all / Đổi mật khẩu tăng `token_version` | `POST /auth/logout-all`<br/>`POST /auth/change-password` | `test_auth_flow.py::test_logout_all_tang_token_version_va_vo_hieu_moi_token_cu`<br/>`test_doi_mat_khau_thanh_cong_va_vo_hieu_moi_token_cu` | ✅ Done |
+| **FR-AUTH-08** | Chống brute-force (5 lần/15 phút khóa 429) | `POST /auth/login` | `test_auth_flow.py::test_brute_force_sai_5_lan_bi_khoa_tam`<br/>`test_brute_force_email_khong_ton_tai_cho_thong_diep_va_hanh_vi_giong_het` | ✅ Done |
+| **FR-AUTH-09** | Guest token (chỉ 1 trận, sống ≤ 3h, gọi API khác bị 403) | `POST /games/join` | `test_guest_and_ticket.py::test_join_game_guest_tao_guest_token_dung_3_gio`<br/>`test_guest_token_sai_tran_bi_tu_choi_khi_lay_ticket`<br/>`test_guest_token_goi_api_khac_bi_403` | ✅ Done |
+| **FR-AUTH-10** | Player đăng nhập join trận dùng token của mình | `POST /games/join` | `test_guest_and_ticket.py::test_join_game_da_dang_nhap_giu_access_token_player` | ✅ Done |
+| **FR-AUTH-11** | WebSocket ticket dùng 1 lần (TTL 30s, GETDEL) | `POST /realtime/ws-ticket` | `test_guest_and_ticket.py::test_ws_ticket_thanh_cong_va_doi_bang_getdel_dung_lan_2_that_bai`<br/>`test_ws_ticket_khong_ton_tai_hoac_qua_30_giay_that_bai` | ✅ Done |
+| **FR-AUTHZ-01** | Ma trận RBAC 4 vai trò × 10 quyền | `Depends(require_permissions)` | `test_rbac_matrix.py::test_rbac_matrix_du_4_vai_tro_x_10_quyen` (40 tests) | ✅ Done |
+| **FR-ADM-06** | CLI quản trị (`seed`, `create-admin`) | `app.cli` | `test_cli.py::test_help_liet_ke_lenh_seed`<br/>`test_cli.py::test_create_admin_mat_khau_yeu_bi_tu_choi`<br/>`test_rbac_seed.py::test_seed_idempotent_va_dung_ma_tran` | ✅ Done |
+
 
 ---
 
