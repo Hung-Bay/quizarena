@@ -1,3 +1,6 @@
+import os
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError
 
@@ -22,6 +25,8 @@ def test_prod_tu_choi_gia_tri_mau_change_me():
         )
 
 
+@patch.dict(os.environ, {}, clear=False)
 def test_bien_gemini_de_trong_la_none():
+    os.environ.pop("GEMINI_API_KEY", None)
     s = Settings(_env_file=None, gemini_rpm=None, **BASE)
     assert s.gemini_rpm is None and s.gemini_api_key is None

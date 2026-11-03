@@ -5,15 +5,16 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.v1 import health
+from app.api.v1 import auth, health
 from app.core.app_factory import create_app
-from app.core.db import create_engine
+from app.core.db import create_engine, create_session_factory
 from app.core.redis import create_redis
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = create_engine()
+    app.state.session_factory = create_session_factory(app.state.engine)
     app.state.redis = create_redis()
     try:
         yield
@@ -24,3 +25,4 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = create_app("QuizArena API", lifespan=lifespan)
 app.include_router(health.router, prefix="/api/v1")
+app.include_router(auth.router, prefix="/api/v1")
