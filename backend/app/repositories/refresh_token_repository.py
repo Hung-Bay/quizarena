@@ -80,3 +80,14 @@ async def revoke_family(session: AsyncSession, family_id: uuid.UUID) -> int:
         .returning(RefreshToken.id)
     )
     return len(result.all())
+
+
+async def revoke_all_for_user(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """Thu hồi mọi refresh token còn hiệu lực của một người dùng (AU-7)."""
+    result = await session.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+        .values(revoked_at=func.now())
+        .returning(RefreshToken.id)
+    )
+    return len(result.all())

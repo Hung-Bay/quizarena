@@ -44,3 +44,21 @@ class TokenResponse(BaseModel):
 
 class LoginResponse(TokenResponse):
     user: UserOut
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=_PASSWORD_MAX)
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_password_policy(cls, value: str) -> str:
+        if not (8 <= len(value) <= _PASSWORD_MAX):
+            raise ValueError(f"Mật khẩu phải dài từ 8 đến {_PASSWORD_MAX} ký tự")
+        if not (re.search(r"[A-Za-z]", value) and re.search(r"\d", value)):
+            raise ValueError("Mật khẩu phải có cả chữ và số")
+        return value
+
+
+class MessageResponse(BaseModel):
+    message: str
