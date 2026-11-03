@@ -12,6 +12,13 @@ def test_help_liet_ke_lenh_seed():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "seed" in result.output
+    assert "create-admin" in result.output
+
+
+def test_create_admin_mat_khau_yeu_bi_tu_choi():
+    result = runner.invoke(app, ["create-admin", "--email", "admin@example.com", "-p", "weak"])
+    assert result.exit_code == 1
+    assert "Mật khẩu phải dài từ 8 đến 128 ký tự" in result.output
 
 
 def test_seed_chay_hai_lan_deu_thanh_cong_va_lan_hai_khong_tao_moi():

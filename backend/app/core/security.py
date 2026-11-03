@@ -127,9 +127,9 @@ def create_guest_token(
     )
 
 
-def decode_token(token: str, *, expected_type: TokenType) -> dict[str, Any]:
+def decode_token(token: str, *, expected_type: TokenType | None = None) -> dict[str, Any]:
     """Giải mã và kiểm tra token. Luôn chỉ định thuật toán (chống tấn công hoán đổi thuật toán / alg=none)
-    và kiểm tra `type` để guest token không thể dùng như access token (và ngược lại)."""
+    và kiểm tra `type` để guest token không thể dùng như access token (và ngược lại khi chỉ định expected_type)."""
     try:
         payload: dict[str, Any] = jwt.decode(
             token,
@@ -142,9 +142,13 @@ def decode_token(token: str, *, expected_type: TokenType) -> dict[str, Any]:
     except jwt.InvalidTokenError as exc:
         raise TokenError("invalid", "Token không hợp lệ") from exc
 
-    if payload["type"] != expected_type:
-        raise TokenError("invalid", "Sai loại token")
-    if expected_type == "guest" and not payload.get("game_id"):
+    if expected_type is not None:
+        if payload["type"] != expected_type:
+            raise TokenError("invalid", "Sai loại token")
+    elif payload["type"] not in ("access", "guest"):
+        raise TokenError("invalid", "Loại token không được hỗ trợ")
+
+    if payload["type"] == "guest" and not payload.get("game_id"):
         raise TokenError("invalid", "Guest token thiếu game_id")
     return payload
 

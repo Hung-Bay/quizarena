@@ -1,7 +1,7 @@
 """Dependency dùng chung cho các router."""
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
 from fastapi import Depends, Request
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
 from app.core.errors import AppError
+from app.core.rbac import PermissionCode
 from app.models import User
 from app.repositories import user_repository as users
 
@@ -37,11 +38,11 @@ def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "127.0.0.1"
 
 
-async def get_current_user_claims(
+async def get_token_claims(
     request: Request,
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> dict[str, Any]:
-    """Trích xuất và kiểm tra JWT access token từ Authorization header (AU-3, AU-6)."""
+    """Trích xuất và xác thực claims từ Authorization header (chấp nhận cả access token và guest token)."""
     auth_header = request.headers.get("Authorization")
     if not auth_header:
         raise AppError("Thiếu access token", code="TOKEN_MISSING", status_code=401)
@@ -56,7 +57,7 @@ async def get_current_user_claims(
 
     token = parts[1]
     try:
-        claims = security.decode_token(token, expected_type="access")
+        claims = security.decode_token(token)
     except security.TokenError as exc:
         if exc.reason == "expired":
             raise AppError("Token đã hết hạn", code="TOKEN_EXPIRED", status_code=401) from exc
@@ -67,6 +68,15 @@ async def get_current_user_claims(
     if jti and await redis.exists(f"deny:jti:{jti}"):
         raise AppError("Token đã bị thu hồi", code="TOKEN_REVOKED", status_code=401)
 
+    return claims
+
+
+async def get_current_user_claims(
+    claims: Annotated[dict[str, Any], Depends(get_token_claims)],
+) -> dict[str, Any]:
+    """Trích xuất và kiểm tra JWT access token (AU-3, AU-6)."""
+    if claims.get("type") != "access":
+        raise AppError("Yêu cầu access token", code="TOKEN_INVALID", status_code=401)
     return claims
 
 
@@ -104,3 +114,22 @@ async def get_current_user(
         )
 
     return user
+
+
+def require_permissions(*required_permissions: PermissionCode | str) -> Callable[..., Any]:
+    """Dependency kiểm tra quyền người dùng dựa trên permissions trong token (RBAC §3.2)."""
+    required = {str(p) for p in required_permissions}
+
+    async def _require_permissions_dep(
+        claims: Annotated[dict[str, Any], Depends(get_token_claims)],
+    ) -> dict[str, Any]:
+        token_permissions = set(claims.get("permissions", []))
+        if not required.issubset(token_permissions):
+            raise AppError(
+                "Không có quyền thực hiện thao tác này",
+                code="FORBIDDEN",
+                status_code=403,
+            )
+        return claims
+
+    return _require_permissions_dep
