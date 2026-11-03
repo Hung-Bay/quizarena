@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.v1 import auth, health
+from app.api.v1 import auth, games, health, realtime
 from app.core.app_factory import create_app
 from app.core.db import create_engine, create_session_factory
 from app.core.redis import create_redis
@@ -26,3 +26,5 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = create_app("QuizArena API", lifespan=lifespan)
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(games.router, prefix="/api/v1")
+app.include_router(realtime.router, prefix="/api/v1")
