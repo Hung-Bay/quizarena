@@ -242,7 +242,8 @@ def setup_teardown_isolation(monkeypatch):
 
     yield fake_redis
 
-    app.dependency_overrides = old_overrides
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(old_overrides)
 
 
 # =========================================================================
