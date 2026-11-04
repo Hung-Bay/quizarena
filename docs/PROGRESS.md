@@ -11,12 +11,42 @@
 |---|---|---|:---:|:---:|
 | **P0** | Thiết kế & Khung hạ tầng | Docker compose, CI/CD, Nginx, Healthz, WS Echo, SRS v0.1 | ✅ Hoàn thành | Tuần 1 |
 | **P1** | Auth, RBAC, Guest Token | JWT rotation, Reuse detection, RBAC 4x10, Guest token, WS ticket, ADR-001 | ✅ Hoàn thành | Tuần 2 |
-| **P2** | Quiz Authoring + AI Sinh Quiz | CRUD quiz, PDF upload, Gemini Gateway, Quota rate limiter, SSE | ⏳ Sắp tới | Tuần 3 |
+| **P2** | Quiz Authoring + AI Sinh Quiz | CRUD quiz, PDF upload, Gemini Gateway, Quota rate limiter, SSE | 🟡 Đang thực hiện | Tuần 3 |
 | **P3** | Live Game Engine | State machine, Redis Lua atomic, Leaderboard ZSET, Game clock, Write-behind | ⏳ Chưa bắt đầu | Tuần 4 |
 | **P4** | Frontend + AI Báo cáo sau trận | React FE, 1 call Gemini/game, Báo cáo cá nhân, Degraded mode | ⏳ Chưa bắt đầu | Tuần 5 |
 | **P5** | Scale Realtime & Nginx Gateway | Scale replica, Redis Pub/Sub, Loadtest 300 bots, Anti-cheat | ⏳ Chưa bắt đầu | Tuần 6 |
 | **P6** | Cloud, Domain, HTTPS, CI/CD | Oracle Cloud ARM, Let's Encrypt, Deploy zero-downtime | ⏳ Chưa bắt đầu | Tuần 7 |
 | **P7** | Observability, Autoscale, Demo | Grafana, Loki, Autoscale, Backup restore, SRS v1.0, Báo cáo | ⏳ Chưa bắt đầu | Tuần 8 |
+
+---
+
+## Chi tiết Phase 2 — Tuần 3: Quiz Authoring + AI Sinh Quiz bằng Gemini
+
+### Nhật ký hàng ngày
+
+- **Thứ Hai (Kiến trúc, Gateway & Quota):**
+  - Chốt bảng quyết định kiến trúc: Lưu file ở volume Docker dùng chung `UPLOAD_DIR`, cache theo nội dung (`sha256 + params`), reset quota theo giờ Pacific, xác thực SSE bằng Bearer token.
+  - Cài đặt dependencies: `google-genai`, `pypdf`, `python-multipart`, `tzdata`.
+  - Thiết kế Gemini Gateway Protocol và `FakeGemini` giả lập (thành công, 429, malformed JSON, timeout).
+  - Triển khai `GeminiGateway` thật với SDK `google-genai`, structured output Pydantic model `QuizDraft`.
+  - Tạo lệnh CLI `uv run python -m app.cli gemini-quota` kiểm tra model thật và quota.
+  - Thiết kế models SQLAlchemy và Alembic migration 0004 cho `quizzes`, `questions`, `question_options` (bổ sung `quizzes.description`). Viết `docs/ADR-002-gemini.md`.
+
+- **Thứ Ba (Bộ luật QZ-2, CRUD & Ownership):**
+  - Xây dựng bộ quy tắc câu hỏi dùng chung `app/services/quiz_rules.py` (QZ-2, QZ-3, QZ-4) cho cả CRUD thủ công, validate AI (Lớp 2) và xuất bản.
+  - Triển khai CRUD Quizzes & Questions, sắp xếp thứ tự câu hỏi (`PUT /quizzes/{id}/questions/reorder`).
+  - Kiểm tra điều kiện xuất bản quiz: tối thiểu 3 câu hỏi hợp lệ (FR-QUIZ-05, QZ-3).
+  - Phân quyền sở hữu chặt chẽ: Host B truy cập quiz của Host A nhận **404 Not Found** (FR-AUTHZ-03).
+  - Viết 38 tests (`test_quiz_rules.py`, `test_quiz_flow.py`) phủ toàn bộ luồng.
+
+- **Thứ Tư (Upload tài liệu, Quota Pacific, ARQ Worker & SSE):**
+  - Tạo models `Document` và `AiJob`, Alembic migration 0005 (`upgrade -> downgrade -> upgrade` thành công).
+  - Endpoint upload tài liệu (`POST /api/v1/ai/quiz-generations` & alias `/api/v1/ai-jobs/upload`): kiểm tra magic bytes `%PDF-`, dung lượng $\le 10$ MB, số trang $\le 30$ trang, từ chối PDF mã hóa/password, tính `sha256`. Phản hồi **202 Accepted trong < 500 ms**.
+  - Kiểm soát quota host $N$ lần/ngày theo múi giờ Pacific (`America/Los_Angeles`), khi vượt trả **429 Too Many Requests** kèm `Retry-After` và thời điểm reset `reset_at` (FR-AIGEN-13).
+  - ARQ Worker: hàm `generate_quiz_task` với `max_tries = 1`, gọi Gateway sinh câu hỏi, validate Lớp 2, tạo bản nháp Quiz và Questions trong DB.
+  - Endpoint SSE `GET /api/v1/ai-jobs/{id}/events`: Stream sự kiện tiến độ `queued -> running -> succeeded / failed` qua Redis Pub/Sub, kiểm tra quyền BOLA Host B $\to 404$ trước khi stream.
+  - Cấu hình hạ tầng: Nginx location SSE `proxy_buffering off;`, header `X-Accel-Buffering: no`. Dockerfile & Compose mount volume `uploads`.
+  - Viết 13 tests tích hợp (`test_document_service.py`, `test_ai_job_flow.py`). Toàn bộ 156 tests PASSED.
 
 ---
 
@@ -73,7 +103,7 @@
 
 ## Chỉ số chất lượng mã nguồn (Code Quality Metrics)
 
-- **Test Suite:** 97 passed, 39 skipped (các test DB khi chạy local không có Postgres instance).
-- **Static Type Analysis (Mypy):** `Success: no issues found in 47 source files` (chế độ strict).
+- **Test Suite:** 156 passed, 39 skipped.
+- **Static Type Analysis (Mypy):** `Success: no issues found in 60 source files` (chế độ strict).
 - **Linter & Formatter (Ruff):** 100% tuân thủ quy chuẩn PEP 8 và định dạng tự động.
-- **Pre-commit Hooks:** Tất cả 8 hook kiểm tra (trailing whitespace, EOF, yaml, secret detection, private key) đều Passed.
+- **Pre-commit Hooks:** Tất cả 8 hook kiểm tra đều Passed.

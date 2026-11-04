@@ -45,8 +45,6 @@ async def fake_get_session() -> AsyncIterator[AsyncMock]:
 
 
 fake_redis = FakeRedis()
-app.dependency_overrides[get_redis] = lambda: fake_redis
-app.dependency_overrides[get_session] = fake_get_session
 
 
 # Thêm endpoint test bảo vệ bằng permission để kiểm tra guest token gọi API khác bị 403
@@ -61,8 +59,14 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def _clear_redis() -> None:
+def _isolate_dependencies():
     redis_store.clear()
+    old_overrides = dict(app.dependency_overrides)
+    app.dependency_overrides[get_redis] = lambda: fake_redis
+    app.dependency_overrides[get_session] = fake_get_session
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(old_overrides)
 
 
 # ------------------------------------------------------------------ AU-9, AU-10: POST /games/join

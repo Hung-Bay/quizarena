@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, func, text
 from sqlalchemy.dialects.postgresql import CITEXT
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.quiz import Quiz
 
 
 class User(Base):
@@ -21,3 +27,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(server_default=text("true"))
     token_version: Mapped[int] = mapped_column(server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    quizzes: Mapped[list[Quiz]] = relationship(
+        "Quiz", back_populates="owner", cascade="all, delete-orphan"
+    )

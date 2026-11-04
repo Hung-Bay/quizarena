@@ -29,3 +29,10 @@ def test_seed_chay_hai_lan_deu_thanh_cong_va_lan_hai_khong_tao_moi():
     second = runner.invoke(app, ["seed"])
     assert first.exit_code == 0 and second.exit_code == 0
     assert "0 vai trò, 0 quyền, 0 lượt gán quyền" in second.output
+
+
+def test_gemini_quota_in_thong_tin():
+    result = runner.invoke(app, ["gemini-quota"])
+    assert result.exit_code == 0
+    assert "THÔNG TIN HẠN MỨC & CẤU HÌNH GEMINI" in result.output
+    assert "Model sinh Quiz" in result.output

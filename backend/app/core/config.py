@@ -31,13 +31,17 @@ class Settings(BaseSettings):
     access_token_minutes: int = Field(default=15, gt=0)
     refresh_token_days: int = Field(default=7, gt=0)
 
-    # --- Gemini (để trống đến Phase 2) ---
+    # --- Gemini (Phase 2) ---
     gemini_api_key: SecretStr | None = None
-    gemini_model_quiz: str | None = None
-    gemini_model_report: str | None = None
-    gemini_rpm: int | None = Field(default=None, gt=0)
-    gemini_rpd: int | None = Field(default=None, gt=0)
+    gemini_model_quiz: str = "gemini-3.5-flash"
+    gemini_model_report: str = "gemini-3.5-flash"
+    gemini_rpm: int | None = Field(default=15, gt=0)
+    gemini_rpd: int | None = Field(default=1500, gt=0)
     ai_generations_per_host_per_day: int = Field(default=5, gt=0)
+    gemini_gateway_mode: Literal["fake", "real"] = "fake"
+
+    # --- Uploads ---
+    upload_dir: str = "uploads"
 
     @model_validator(mode="after")
     def _no_placeholder_secrets_in_prod(self) -> "Settings":
