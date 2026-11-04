@@ -27,11 +27,21 @@ _HTTP_CODES = {
 class AppError(Exception):
     """Lỗi nghiệp vụ. Ví dụ: raise AppError("Trận không tồn tại", code="GAME_NOT_FOUND", status_code=404)."""
 
-    def __init__(self, message: str, *, code: str = "BAD_REQUEST", status_code: int = 400) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "BAD_REQUEST",
+        status_code: int = 400,
+        headers: dict[str, str] | None = None,
+        details: list[dict[str, Any]] | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.code = code
         self.status_code = status_code
+        self.headers = headers
+        self.details = details
 
 
 def error_response(
@@ -55,7 +65,13 @@ def error_response(
 
 async def _app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, AppError)
-    return error_response(exc.status_code, exc.code, exc.message)
+    return error_response(
+        exc.status_code,
+        exc.code,
+        exc.message,
+        headers=exc.headers,
+        details=exc.details,
+    )
 
 
 async def _http_exception_handler(request: Request, exc: Exception) -> JSONResponse:

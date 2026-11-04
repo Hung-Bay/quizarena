@@ -9,7 +9,7 @@ Tuân thủ ERD §4.2 và các ràng buộc nghiệp vụ QZ-1...QZ-3:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func, text
@@ -47,10 +47,14 @@ class Quiz(Base):
     )
     play_count: Mapped[int] = mapped_column(Integer, server_default=text("0"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -90,7 +94,10 @@ class Question(Base):
     source_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ai_generated: Mapped[bool] = mapped_column(server_default=text("false"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
     )
 
     quiz: Mapped[Quiz] = relationship("Quiz", back_populates="questions")

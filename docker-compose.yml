@@ -79,6 +79,8 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis:   { condition: service_healthy }
+    volumes:
+      - uploads:/app/uploads
     networks: [app, data]
     stop_grace_period: 15s
     deploy:
@@ -109,6 +111,8 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis:   { condition: service_healthy }
+    volumes:
+      - uploads:/app/uploads
     networks: [app, data]     # `app` (không internal) để sau này gọi được Gemini
     stop_grace_period: 30s    # chờ job đang chạy làm xong
     deploy:
@@ -149,3 +153,4 @@ networks:
 volumes:
   pgdata:
   redisdata:
+  uploads:

@@ -32,7 +32,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 # User không phải root (uid cố định để dễ phân quyền volume về sau)
 RUN groupadd --system --gid 10001 app \
-    && useradd  --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app
+    && useradd  --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
+    && mkdir -p /app/uploads \
+    && chown -R app:app /app/uploads
 
 WORKDIR /app
 
