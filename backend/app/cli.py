@@ -10,6 +10,9 @@ import re
 
 import typer
 
+from app.ai.gemini_gateway import create_gemini_gateway
+from app.ai.schemas import AiGenerationParams
+from app.core.config import get_settings
 from app.core.db import create_engine, create_session_factory
 from app.core.rbac import RoleName
 from app.core.security import hash_password_async
@@ -96,6 +99,77 @@ def create_admin(
 
     msg = asyncio.run(_create_admin(email=email, password=password))
     typer.echo(msg)
+
+
+@app.command("gemini-quota")
+def gemini_quota(
+    test: bool = typer.Option(
+        False, "--test", "-t", help="Thực hiện 1 lệnh gọi test sinh câu hỏi qua Gemini Gateway"
+    ),
+) -> None:
+    """In thông tin hạn mức Gemini, cấu hình rate limit và kiểm tra kết nối (§3.8)."""
+    settings = get_settings()
+    gateway = create_gemini_gateway(settings)
+    mode = getattr(settings, "gemini_gateway_mode", "fake")
+
+    typer.echo("=== THÔNG TIN HẠN MỨC & CẤU HÌNH GEMINI ===")
+    typer.echo(f"Chế độ Gateway        : {mode.upper()}")
+    typer.echo(f"Model sinh Quiz       : {settings.gemini_model_quiz}")
+    typer.echo(f"Model viết báo cáo    : {settings.gemini_model_report}")
+    typer.echo(f"Giới hạn RPM cấu hình : {settings.gemini_rpm} req/phút")
+    typer.echo(f"Giới hạn RPD cấu hình : {settings.gemini_rpd} req/ngày (theo giờ Pacific)")
+    typer.echo(f"Hạn mức host/ngày     : {settings.ai_generations_per_host_per_day} lần/ngày")
+
+    # Kiểm tra kết nối model
+    info = gateway.get_model_info()
+    typer.echo(f"Trạng thái kết nối    : {info.get('status')}")
+    if info.get("status") == "connected":
+        typer.echo(f"Display Name          : {info.get('display_name')}")
+        input_limit = info.get("input_token_limit")
+        output_limit = info.get("output_token_limit")
+        typer.echo(
+            f"Input Token Limit     : {input_limit:,}"
+            if input_limit
+            else "Input Token Limit     : N/A"
+        )
+        typer.echo(
+            f"Output Token Limit    : {output_limit:,}"
+            if output_limit
+            else "Output Token Limit    : N/A"
+        )
+    elif info.get("error"):
+        typer.echo(f"Chi tiết lỗi kết nối  : {info.get('error')}")
+
+    if test:
+        typer.echo("\n--- Đang thực hiện kiểm thử sinh câu hỏi qua Gateway ---")
+        params = AiGenerationParams(
+            num_questions=5,
+            difficulty="easy",
+            language="vi",
+            allowed_types=["single"],
+            note="Kiểm tra kết nối CLI",
+        )
+        try:
+            res = asyncio.run(
+                gateway.generate_quiz_from_text(
+                    text_content="Việt Nam là một quốc gia nằm ở khu vực Đông Nam Á, thủ đô là Hà Nội.",
+                    params=params,
+                )
+            )
+            typer.echo(f"Thành công! Tiêu đề: {res.draft.title}")
+            typer.echo(f"Số câu hỏi sinh ra : {len(res.draft.questions)}")
+            typer.echo(f"Câu hỏi 1          : {res.draft.questions[0].content}")
+            for opt in res.draft.questions[0].options:
+                mark = "[X]" if opt.is_correct else "[ ]"
+                typer.echo(f"  {mark} {opt.content}")
+            typer.echo(
+                f"Token sử dụng      : input={res.usage.input_tokens}, "
+                f"output={res.usage.output_tokens}, total={res.usage.total_tokens}"
+            )
+            typer.echo(f"Model thực thi     : {res.model_name}")
+        except Exception as err:
+            typer.echo(f"Lỗi kiểm thử: {err}", err=True)
+            raise typer.Exit(code=1) from err
 
 
 if __name__ == "__main__":
