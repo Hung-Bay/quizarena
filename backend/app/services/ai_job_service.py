@@ -2,19 +2,24 @@
 
 Quản lý luồng:
 1. Upload & Kiểm tra file PDF (dung lượng, magic bytes, trang).
-2. Kiểm soát hạn mức quota host theo ngày giờ Pacific (FR-AIGEN-13).
-3. Lưu trữ tệp và tạo bản ghi DB (Document, AiJob).
-4. Đẩy tác vụ vào hàng đợi ARQ worker và phát thông báo SSE ban đầu.
-5. Truyền phát sự kiện tiến độ SSE qua Redis Pub/Sub theo chuẩn W3C EventSource.
+2. Content Caching (AG-8): Tra cứu cache theo (sha256, params_hash).
+   - Nếu Cache Hit: Tạo bản nháp riêng cho Host từ kết quả cũ, 0 lần gọi Gemini,
+     không tính quota N lần/ngày, ai_jobs.cache_hit = True.
+3. Nếu Cache Miss: Kiểm soát hạn mức quota host theo ngày giờ Pacific (FR-AIGEN-13).
+4. Lưu trữ tệp và tạo bản ghi DB (Document, AiJob).
+5. Đẩy tác vụ vào hàng đợi ARQ worker và phát thông báo SSE ban đầu.
+6. Truyền phát sự kiện tiến độ SSE qua Redis Pub/Sub theo chuẩn W3C EventSource.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from arq import ArqRedis, create_pool
 from arq.connections import RedisSettings
@@ -24,7 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.models.ai import AiJob
-from app.repositories import ai_repository
+from app.models.quiz import Question, QuestionOption, Quiz
+from app.repositories import ai_repository, quiz_repository
 from app.schemas.ai import AiJobEnqueueResponse, AiJobParams
 from app.services.document_service import save_uploaded_file, validate_pdf_content
 from app.services.quota_service import check_and_increment_host_ai_quota
@@ -32,6 +38,19 @@ from app.services.quota_service import check_and_increment_host_ai_quota
 log = logging.getLogger("app.services.ai_job")
 
 _arq_pool: ArqRedis | None = None
+
+
+def compute_params_hash(params: AiJobParams) -> str:
+    """Tạo mã băm đại diện duy nhất cho bộ tham số sinh quiz (canonical JSON)."""
+    canonical = {
+        "num_questions": params.num_questions,
+        "difficulty": params.difficulty,
+        "language": params.language,
+        "question_types": sorted(params.question_types),
+        "notes": (params.notes or "").strip(),
+    }
+    canonical_str = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
 
 
 async def get_arq_redis_pool() -> ArqRedis:
@@ -61,22 +80,138 @@ async def enqueue_quiz_generation_job(
     settings = get_settings()
     actual_upload_dir = upload_dir or settings.upload_dir
 
-    # 1. Kiểm tra quota của host (FR-AIGEN-13, 429 nếu hết hạn mức)
+    # 1. Kiểm tra tính hợp lệ của tài liệu PDF (FR-AIGEN-01)
+    pages_count, sha256 = validate_pdf_content(file_bytes)
+
+    # 2. Tính toán params_hash phục vụ Content Caching (AG-8)
+    p_hash = compute_params_hash(params)
+    params_dict = params.model_dump()
+    params_dict["_params_hash"] = p_hash
+
+    # 3. Kiểm tra Content Cache: (sha256, params_hash)
+    cached_job = await ai_repository.find_cached_ai_job(session, sha256=sha256, params_hash=p_hash)
+    if cached_job and cached_job.result and cached_job.result.get("quiz_id"):
+        cached_quiz_id = uuid.UUID(str(cached_job.result["quiz_id"]))
+        cached_quiz = await quiz_repository.get_by_id(
+            session, cached_quiz_id, include_questions=True
+        )
+        if cached_quiz:
+            log.info(
+                "Content Cache Hit: sha256=%s, params_hash=%s. Không gọi Gemini, không tốn quota.",
+                sha256,
+                p_hash,
+            )
+            # Lưu tài liệu cho host hiện tại
+            storage_path = await asyncio.to_thread(
+                save_uploaded_file, file_bytes, actual_upload_dir, sha256
+            )
+            doc = await ai_repository.create_document(
+                session,
+                uploaded_by=user_id,
+                filename=filename,
+                mime="application/pdf",
+                size_bytes=len(file_bytes),
+                pages=pages_count,
+                sha256=sha256,
+                storage_path=storage_path,
+            )
+
+            # Sao chép Quiz và Questions thành bản nháp độc lập cho Host này
+            new_quiz = Quiz(
+                owner_id=user_id,
+                title=cached_quiz.title,
+                description=cached_quiz.description,
+                status="draft",
+                visibility="private",
+                version=1,
+                tags=list(cached_quiz.tags or ["ai-generated", "cached"]),
+            )
+            session.add(new_quiz)
+            await session.flush()
+
+            for q in cached_quiz.questions:
+                new_q = Question(
+                    quiz_id=new_quiz.id,
+                    position=q.position,
+                    type=q.type,
+                    content=q.content,
+                    explanation=q.explanation,
+                    topic=q.topic,
+                    time_limit_s=q.time_limit_s,
+                    points=q.points,
+                    source_ref=q.source_ref,
+                    ai_generated=True,
+                )
+                session.add(new_q)
+                await session.flush()
+
+                for opt in q.options:
+                    new_opt = QuestionOption(
+                        question_id=new_q.id,
+                        position=opt.position,
+                        content=opt.content,
+                        is_correct=opt.is_correct,
+                    )
+                    session.add(new_opt)
+
+            await session.flush()
+
+            # Tạo AiJob đánh dấu cache_hit=True, status="succeeded"
+            new_job = await ai_repository.create_ai_job(
+                session,
+                kind="quiz_generation",
+                created_by=user_id,
+                document_id=doc.id,
+                params=params_dict,
+            )
+            new_job.status = "succeeded"
+            new_job.cache_hit = True
+            new_job.finished_at = datetime.now(UTC)
+            new_job.result = {
+                "quiz_id": str(new_quiz.id),
+                "title": new_quiz.title,
+                "total_generated": len(cached_quiz.questions),
+                "valid_questions": len(cached_quiz.questions),
+                "cached_from_job_id": str(cached_job.id),
+                "cache_hit": True,
+            }
+            await session.flush()
+
+            # Phát sự kiện qua Redis Pub/Sub
+            await redis.publish(
+                f"ai:job:{new_job.id}",
+                json.dumps(
+                    {
+                        "job_id": str(new_job.id),
+                        "status": "succeeded",
+                        "quiz_id": str(new_quiz.id),
+                        "cache_hit": True,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                ),
+            )
+
+            # Phản hồi 202 thành công ngay, không tăng quota host
+            return AiJobEnqueueResponse(
+                job_id=new_job.id,
+                status="succeeded",
+                document_id=doc.id,
+                message="Bản nháp quiz đã được tạo thành công từ bộ nhớ đệm (Cache Hit - 0 lần gọi Gemini)",
+            )
+
+    # 4. Cache Miss: Kiểm tra quota của host (FR-AIGEN-13, 429 nếu hết hạn mức)
     await check_and_increment_host_ai_quota(
         redis=redis,
         user_id=user_id,
         daily_limit=settings.ai_generations_per_host_per_day,
     )
 
-    # 2. Kiểm tra tính hợp lệ của tài liệu PDF (FR-AIGEN-01)
-    pages_count, sha256 = validate_pdf_content(file_bytes)
-
-    # 3. Lưu tệp vào ổ đĩa / volume dùng chung
+    # 5. Lưu tệp vào ổ đĩa / volume dùng chung
     storage_path = await asyncio.to_thread(
         save_uploaded_file, file_bytes, actual_upload_dir, sha256
     )
 
-    # 4. Ghi nhận vào cơ sở dữ liệu
+    # 6. Ghi nhận vào cơ sở dữ liệu
     doc = await ai_repository.create_document(
         session,
         uploaded_by=user_id,
@@ -88,7 +223,6 @@ async def enqueue_quiz_generation_job(
         storage_path=storage_path,
     )
 
-    params_dict = params.model_dump()
     job = await ai_repository.create_ai_job(
         session,
         kind="quiz_generation",
@@ -97,7 +231,7 @@ async def enqueue_quiz_generation_job(
         params=params_dict,
     )
 
-    # 5. Đẩy tác vụ vào hàng đợi ARQ
+    # 7. Đẩy tác vụ vào hàng đợi ARQ
     try:
         pool = arq_pool or await get_arq_redis_pool()
         await pool.enqueue_job(
@@ -110,7 +244,7 @@ async def enqueue_quiz_generation_job(
         # Nếu Redis arq queue lỗi, vẫn phát pub/sub để client biết
         pass
 
-    # 6. Phát sự kiện ban đầu 'queued' lên Redis Pub/Sub
+    # 8. Phát sự kiện ban đầu 'queued' lên Redis Pub/Sub
     init_event = {
         "job_id": str(job.id),
         "status": "queued",

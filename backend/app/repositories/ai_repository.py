@@ -90,6 +90,33 @@ async def get_ai_job_by_id(
     return result.scalar_one_or_none()
 
 
+async def find_cached_ai_job(
+    session: AsyncSession,
+    sha256: str,
+    params_hash: str,
+) -> AiJob | None:
+    """Tìm một tác vụ AI đã hoàn thành thành công có cùng file sha256 và params_hash (AG-8)."""
+    stmt = (
+        select(AiJob)
+        .join(Document, AiJob.document_id == Document.id)
+        .where(
+            Document.sha256 == sha256,
+            AiJob.status == "succeeded",
+            AiJob.kind == "quiz_generation",
+        )
+        .order_by(AiJob.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    if result is None:
+        return None
+    jobs = result.scalars().all()
+    for j in jobs:
+        j_hash = j.params.get("_params_hash") or j.params.get("params_hash")
+        if j_hash == params_hash and j.result and j.result.get("quiz_id"):
+            return j
+    return None
+
+
 async def update_ai_job_status(
     session: AsyncSession,
     job_id: uuid.UUID,
@@ -99,6 +126,7 @@ async def update_ai_job_status(
     error: str | None = None,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    attempts: int = 0,
     cache_hit: bool = False,
     finished: bool = False,
 ) -> AiJob | None:
@@ -116,6 +144,8 @@ async def update_ai_job_status(
         job.input_tokens = input_tokens
     if output_tokens > 0:
         job.output_tokens = output_tokens
+    if attempts > 0:
+        job.attempts = attempts
     if cache_hit:
         job.cache_hit = cache_hit
     if finished:
