@@ -4,10 +4,13 @@ Tuân thủ nghiêm ngặt quy định kiến trúc ADR-002:
 - Toàn bộ import từ `google.genai` được cô lập tại đây.
 - Sử dụng Structured Output với Pydantic model QuizDraft.
 - Xử lý prompt injection: Đánh dấu tài liệu là DATA.
-- Bắt lỗi 429 và trích xuất retryDelay nếu có.
+- Bắt lỗi 429, trích xuất retryDelay và tự động thử lại tối đa 3 lần.
+- Áp dụng timeout 90 giây cho mỗi lời gọi API.
 """
 
 import asyncio
+import logging
+import re
 from typing import Any
 
 from google import genai
@@ -22,6 +25,8 @@ from app.ai.schemas import (
     QuizDraft,
 )
 from app.core.config import Settings, get_settings
+
+log = logging.getLogger("app.ai.gemini_gateway")
 
 
 def _build_system_instruction() -> str:
@@ -71,9 +76,11 @@ class GeminiGateway(GeminiGatewayProtocol):
         api_key: str,
         model_name: str = "gemini-3.5-flash",
         timeout_seconds: float = 90.0,
+        max_retries: int = 3,
     ) -> None:
         self.model_name = model_name
         self.timeout_seconds = timeout_seconds
+        self.max_retries = max_retries
         self.client = genai.Client(api_key=api_key)
 
     def get_model_info(self) -> dict[str, Any]:
@@ -107,14 +114,31 @@ class GeminiGateway(GeminiGatewayProtocol):
             usage.total_tokens = getattr(meta, "total_token_count", 0) or 0
         return usage
 
+    def _parse_retry_delay(self, e: Exception) -> float:
+        """Trích xuất retryDelay từ thông báo lỗi của Google GenAI SDK."""
+        msg = str(e)
+        patterns = [
+            r"retry[_\s\-]?delay[\"':\s]+(\d+(?:\.\d+)?)s?",
+            r"retry\s+after\s+(\d+(?:\.\d+)?)s?",
+            r"please\s+retry\s+after\s+(\d+(?:\.\d+)?)s?",
+        ]
+        for pat in patterns:
+            m = re.search(pat, msg, re.IGNORECASE)
+            if m:
+                try:
+                    val = float(m.group(1))
+                    if val > 0:
+                        return min(val, 60.0)
+                except ValueError:
+                    pass
+        return 1.0
+
     def _handle_exception(self, e: Exception) -> None:
         """Chuẩn hóa ngoại lệ từ Google SDK sang ngoại lệ nội bộ."""
         if isinstance(e, errors.ClientError) and getattr(e, "code", None) == 429:
-            retry_delay = 1.0
-            # Thử trích xuất retryDelay nếu có trong message hoặc response
-            msg = str(e)
+            retry_delay = self._parse_retry_delay(e)
             raise GeminiRateLimitError(
-                message=f"Gemini API 429 Quota Exceeded: {msg}", retry_delay=retry_delay
+                message=f"Gemini API 429 Quota Exceeded: {e}", retry_delay=retry_delay
             ) from e
         if isinstance(e, errors.APIError):
             raise GeminiGatewayError(f"Gemini API Error [{e.code}]: {e.message}") from e
@@ -129,41 +153,57 @@ class GeminiGateway(GeminiGatewayProtocol):
             user_prompt,
         ]
         config = self._get_generation_config()
-
         loop = asyncio.get_running_loop()
-        try:
-            res = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: self.client.models.generate_content(
-                        model=self.model_name,
-                        contents=contents,
-                        config=config,
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                res = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: self.client.models.generate_content(
+                            model=self.model_name,
+                            contents=contents,
+                            config=config,
+                        ),
                     ),
-                ),
-                timeout=self.timeout_seconds,
-            )
-        except TimeoutError as te:
-            raise TimeoutError(
-                f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
-            ) from te
-        except Exception as e:
-            self._handle_exception(e)
+                    timeout=self.timeout_seconds,
+                )
 
-        raw_text = res.text or ""
-        try:
-            draft = QuizDraft.model_validate_json(raw_text)
-        except Exception as parse_err:
-            raise GeminiGatewayError(
-                f"Gemini trả về JSON không khớp schema QuizDraft: {parse_err}"
-            ) from parse_err
+                raw_text = res.text or ""
+                try:
+                    draft = QuizDraft.model_validate_json(raw_text)
+                except Exception as parse_err:
+                    raise GeminiGatewayError(
+                        f"Gemini trả về JSON không khớp schema QuizDraft: {parse_err}"
+                    ) from parse_err
 
-        return GeneratedQuizResponse(
-            draft=draft,
-            raw_json=raw_text,
-            usage=self._extract_usage(res),
-            model_name=self.model_name,
-        )
+                return GeneratedQuizResponse(
+                    draft=draft,
+                    raw_json=raw_text,
+                    usage=self._extract_usage(res),
+                    model_name=self.model_name,
+                )
+
+            except TimeoutError as te:
+                raise TimeoutError(
+                    f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
+                ) from te
+            except Exception as e:
+                try:
+                    self._handle_exception(e)
+                except GeminiRateLimitError as rle:
+                    if attempt >= self.max_retries:
+                        raise
+                    delay = rle.retry_delay or (1.0 * (2**attempt))
+                    log.warning(
+                        "Gemini 429 Rate Limited (attempt %d/%d). Đang chờ %.2fs...",
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+
+        raise GeminiGatewayError("Đã hết số lần thử lại kết nối Gemini.")
 
     async def generate_quiz_from_file(
         self, file_bytes: bytes, mime_type: str, params: AiGenerationParams
@@ -172,41 +212,57 @@ class GeminiGateway(GeminiGatewayProtocol):
         file_part = types.Part.from_bytes(data=file_bytes, mime_type=mime_type)
         contents = [file_part, user_prompt]
         config = self._get_generation_config()
-
         loop = asyncio.get_running_loop()
-        try:
-            res = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: self.client.models.generate_content(
-                        model=self.model_name,
-                        contents=contents,
-                        config=config,
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                res = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: self.client.models.generate_content(
+                            model=self.model_name,
+                            contents=contents,
+                            config=config,
+                        ),
                     ),
-                ),
-                timeout=self.timeout_seconds,
-            )
-        except TimeoutError as te:
-            raise TimeoutError(
-                f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
-            ) from te
-        except Exception as e:
-            self._handle_exception(e)
+                    timeout=self.timeout_seconds,
+                )
 
-        file_raw_text = res.text or ""
-        try:
-            draft = QuizDraft.model_validate_json(file_raw_text)
-        except Exception as parse_err:
-            raise GeminiGatewayError(
-                f"Gemini trả về JSON không khớp schema QuizDraft: {parse_err}"
-            ) from parse_err
+                file_raw_text = res.text or ""
+                try:
+                    draft = QuizDraft.model_validate_json(file_raw_text)
+                except Exception as parse_err:
+                    raise GeminiGatewayError(
+                        f"Gemini trả về JSON không khớp schema QuizDraft: {parse_err}"
+                    ) from parse_err
 
-        return GeneratedQuizResponse(
-            draft=draft,
-            raw_json=file_raw_text,
-            usage=self._extract_usage(res),
-            model_name=self.model_name,
-        )
+                return GeneratedQuizResponse(
+                    draft=draft,
+                    raw_json=file_raw_text,
+                    usage=self._extract_usage(res),
+                    model_name=self.model_name,
+                )
+
+            except TimeoutError as te:
+                raise TimeoutError(
+                    f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
+                ) from te
+            except Exception as e:
+                try:
+                    self._handle_exception(e)
+                except GeminiRateLimitError as rle:
+                    if attempt >= self.max_retries:
+                        raise
+                    delay = rle.retry_delay or (1.0 * (2**attempt))
+                    log.warning(
+                        "Gemini 429 Rate Limited (attempt %d/%d). Đang chờ %.2fs...",
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+
+        raise GeminiGatewayError("Đã hết số lần thử lại kết nối Gemini.")
 
 
 def create_gemini_gateway(settings: Settings | None = None) -> GeminiGatewayProtocol:

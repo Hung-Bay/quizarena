@@ -227,10 +227,21 @@ def setup_teardown_isolation(monkeypatch):
                 setattr(job, k, v)
         return job
 
+    async def mock_find_cached(session, sha256, params_hash):
+        for j in jobs_db.values():
+            if j.status == "succeeded":
+                doc = docs_db.get(j.document_id)
+                if doc and doc.sha256 == sha256:
+                    j_hash = j.params.get("_params_hash") or j.params.get("params_hash")
+                    if j_hash == params_hash and j.result and j.result.get("quiz_id"):
+                        return j
+        return None
+
     monkeypatch.setattr(ai_repository, "create_document", mock_create_doc)
     monkeypatch.setattr(ai_repository, "create_ai_job", mock_create_job)
     monkeypatch.setattr(ai_repository, "get_ai_job_by_id", mock_get_job)
     monkeypatch.setattr(ai_repository, "update_ai_job_status", mock_update_job)
+    monkeypatch.setattr(ai_repository, "find_cached_ai_job", mock_find_cached)
 
     # Mock ARQ pool enqueue
     async def mock_enqueue(*args, **kwargs):

@@ -48,6 +48,13 @@
   - Cấu hình hạ tầng: Nginx location SSE `proxy_buffering off;`, header `X-Accel-Buffering: no`. Dockerfile & Compose mount volume `uploads`.
   - Viết 13 tests tích hợp (`test_document_service.py`, `test_ai_job_flow.py`). Toàn bộ 156 tests PASSED.
 
+- **Thứ Năm (Limiter Lua, Retry 429, Validate 2 lớp, Content Caching):**
+  - **Limiter toàn cục trên Redis (Lua script - FR-AIGEN-12):** Triển khai `app/services/gemini_rate_limiter.py` với thuật toán Token Bucket nguyên tử kiểm soát RPM và counter RPD reset theo 00:00 Pacific (`America/Los_Angeles`). Hỗ trợ cơ chế dự trữ ưu tiên (Priority Reservation): sinh quiz được lấy token tới cạn; tác vụ báo cáo/khác chỉ lấy token khi bucket còn lớn hơn ngưỡng dự trữ an toàn (reserve threshold = 2). Viết test mô phỏng 2 workers chạy đồng thời bắn 30 jobs kiểm soát RPM an toàn (`test_gemini_rate_limiter.py`).
+  - **Xử lý lỗi Gemini & Retry 429 (FR-AIGEN-12):** Tự động bắt lỗi 429 từ Gemini API, trích xuất `retryDelay`, tự động backoff retry tối đa 3 lần. Thiết lập timeout 90 giây cho mỗi lời gọi API. Ghi nhận `input_tokens`, `output_tokens`, `attempts` vào `ai_jobs`. Cải tiến `FakeGemini` hỗ trợ mô phỏng 429, JSON hỏng, timeout và số câu lỗi.
+  - **Validate 2 lớp & Cơ chế Retry (FR-AIGEN-04...06):** Lớp 1 (Pydantic QuizDraft schema validation); Lớp 2 (Nghiệp vụ QZ-2). Nếu số câu hợp lệ $< 50\%$ số lượng yêu cầu $\to$ worker tự động gọi retry 1 lần với Gemini kèm feedback danh sách lỗi để sửa.
+  - **Content Caching (AG-8, FR-AIGEN-10):** Tra cứu theo `sha256(file) + params_hash`. Khi Cache Hit: sao chép câu hỏi thành bộ Quiz riêng biệt thuộc quyền sở hữu của Host yêu cầu (ASM-2), 0 lần gọi Gemini (call_count không đổi), không tốn quota của host, đánh dấu `ai_jobs.cache_hit = True` (chứng minh bằng một câu lệnh SQL). Viết test `test_content_caching.py` kiểm chứng toàn diện.
+  - Bộ test tăng lên **165 passed**, 39 skipped, 0 failed. Mypy sạch 100% (61 source files).
+
 ---
 
 ## Chi tiết Phase 1 — Tuần 2: Auth, RBAC, Guest Token (28/10/2026 – 03/11/2026)
@@ -103,7 +110,7 @@
 
 ## Chỉ số chất lượng mã nguồn (Code Quality Metrics)
 
-- **Test Suite:** 156 passed, 39 skipped.
-- **Static Type Analysis (Mypy):** `Success: no issues found in 60 source files` (chế độ strict).
+- **Test Suite:** 165 passed, 39 skipped, 0 failed (204 tests tổng cộng).
+- **Static Type Analysis (Mypy):** `Success: no issues found in 61 source files` (chế độ strict).
 - **Linter & Formatter (Ruff):** 100% tuân thủ quy chuẩn PEP 8 và định dạng tự động.
 - **Pre-commit Hooks:** Tất cả 8 hook kiểm tra đều Passed.

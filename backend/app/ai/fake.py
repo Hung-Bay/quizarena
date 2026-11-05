@@ -2,10 +2,13 @@
 
 Hỗ trợ mô phỏng:
 - Thành công: trả về QuizDraft hợp lệ theo đúng params (số câu, ngôn ngữ, loại câu).
-- Lỗi 429: mô phỏng Rate Limit kèm thời gian retryDelay.
+- Lỗi 429: mô phỏng Rate Limit kèm thời gian retryDelay, hỗ trợ `fail_429_count` để test cơ chế retry tự động tối đa 3 lần.
 - Lỗi Malformed JSON: mô phỏng LLM trả về cú pháp hỏng để test tầng validate 1.
 - Lỗi Timeout: mô phỏng kết nối quá hạn 90s.
+- Lớp 2 Validation vi phạm: mô phỏng câu hỏi lỗi để test cơ chế retry khi < 50% số câu hợp lệ.
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
@@ -42,17 +45,23 @@ class FakeGemini(GeminiGatewayProtocol):
     def __init__(
         self,
         *,
+        fail_429_count: int = 0,
+        retry_delay_seconds: float = 0.05,
         should_fail_429: bool = False,
-        retry_delay_seconds: float = 1.0,
         should_return_malformed_json: bool = False,
         should_timeout: bool = False,
         custom_draft: QuizDraft | None = None,
+        invalid_questions_count: int = 0,
+        max_retries: int = 3,
     ) -> None:
-        self.should_fail_429 = should_fail_429
+        self.fail_429_count = fail_429_count
         self.retry_delay_seconds = retry_delay_seconds
+        self.should_fail_429 = should_fail_429
         self.should_return_malformed_json = should_return_malformed_json
         self.should_timeout = should_timeout
         self.custom_draft = custom_draft
+        self.invalid_questions_count = invalid_questions_count
+        self.max_retries = max_retries
 
         self.call_count: int = 0
         self.call_history: list[dict[str, Any]] = []
@@ -66,16 +75,30 @@ class FakeGemini(GeminiGatewayProtocol):
         is_vi = params.language == "vi"
         allowed = params.allowed_types or ["single", "multiple", "true_false"]
 
+        # Nếu note chứa thông báo phản hồi lỗi lần trước, coi như Gemini đã sửa hết lỗi
+        is_retry_feedback = bool(params.note and "PHẢN HỒI LỖI" in params.note)
+
         for i in range(1, params.num_questions + 1):
             q_type = allowed[(i - 1) % len(allowed)]
+
+            # Mô phỏng câu hỏi vi phạm nếu cấu hình invalid_questions_count và chưa phải lần retry phản hồi
+            is_deliberately_invalid = not is_retry_feedback and i <= self.invalid_questions_count
+
             if q_type == "true_false":
+                if is_deliberately_invalid:
+                    opts = [
+                        QuestionOptionDraft(content="Đúng" if is_vi else "True", is_correct=False),
+                        QuestionOptionDraft(content="Sai" if is_vi else "False", is_correct=False),
+                    ]
+                else:
+                    opts = [
+                        QuestionOptionDraft(content="Đúng" if is_vi else "True", is_correct=True),
+                        QuestionOptionDraft(content="Sai" if is_vi else "False", is_correct=False),
+                    ]
                 q = QuestionDraft(
                     content=f"Câu hỏi {i} (Đúng/Sai): Đây là phát biểu mẫu số {i}?",
                     type="true_false",
-                    options=[
-                        QuestionOptionDraft(content="Đúng" if is_vi else "True", is_correct=True),
-                        QuestionOptionDraft(content="Sai" if is_vi else "False", is_correct=False),
-                    ],
+                    options=opts,
                     explanation=f"Giải thích cho câu {i}",
                     topic="Kiến thức chung",
                     source_ref=f"Trang {min(i, 5)}",
@@ -83,15 +106,22 @@ class FakeGemini(GeminiGatewayProtocol):
                     points=1000,
                 )
             elif q_type == "multiple":
-                q = QuestionDraft(
-                    content=f"Câu hỏi {i} (Nhiều đáp án): Những lựa chọn nào sau đây là đúng?",
-                    type="multiple",
-                    options=[
+                if is_deliberately_invalid:
+                    opts = [
+                        QuestionOptionDraft(content=f"Lựa chọn A của câu {i}", is_correct=False),
+                        QuestionOptionDraft(content=f"Lựa chọn B của câu {i}", is_correct=False),
+                    ]
+                else:
+                    opts = [
                         QuestionOptionDraft(content=f"Lựa chọn A của câu {i}", is_correct=True),
                         QuestionOptionDraft(content=f"Lựa chọn B của câu {i}", is_correct=True),
                         QuestionOptionDraft(content=f"Lựa chọn C của câu {i}", is_correct=False),
                         QuestionOptionDraft(content=f"Lựa chọn D của câu {i}", is_correct=False),
-                    ],
+                    ]
+                q = QuestionDraft(
+                    content=f"Câu hỏi {i} (Nhiều đáp án): Những lựa chọn nào sau đây là đúng?",
+                    type="multiple",
+                    options=opts,
                     explanation=f"Giải thích cho câu {i}",
                     topic="Kiến thức nâng cao",
                     source_ref=f"Trang {min(i, 5)}",
@@ -99,10 +129,13 @@ class FakeGemini(GeminiGatewayProtocol):
                     points=2000,
                 )
             else:  # single
-                q = QuestionDraft(
-                    content=f"Câu hỏi {i}: Đâu là câu trả lời chính xác nhất?",
-                    type="single",
-                    options=[
+                if is_deliberately_invalid:
+                    opts = [
+                        QuestionOptionDraft(content="Đáp án giống nhau", is_correct=False),
+                        QuestionOptionDraft(content="Đáp án giống nhau", is_correct=False),
+                    ]
+                else:
+                    opts = [
                         QuestionOptionDraft(content=f"Đáp án đúng của câu {i}", is_correct=True),
                         QuestionOptionDraft(
                             content=f"Phương án sai 1 của câu {i}", is_correct=False
@@ -113,7 +146,11 @@ class FakeGemini(GeminiGatewayProtocol):
                         QuestionOptionDraft(
                             content=f"Phương án sai 3 của câu {i}", is_correct=False
                         ),
-                    ],
+                    ]
+                q = QuestionDraft(
+                    content=f"Câu hỏi {i}: Đâu là câu trả lời chính xác nhất?",
+                    type="single",
+                    options=opts,
                     explanation=f"Giải thích cho câu {i}",
                     topic="Kiến thức cơ bản",
                     source_ref=f"Trang {min(i, 5)}",
@@ -145,17 +182,16 @@ class FakeGemini(GeminiGatewayProtocol):
         self.call_history.append({"source": source_info, "params": params.model_dump()})
 
         if self.should_timeout:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.01)
             raise TimeoutError("Mô phỏng Gemini API timeout sau 90 giây")
 
-        if self.should_fail_429:
+        if self.should_fail_429 or self.call_count <= self.fail_429_count:
             raise GeminiRateLimitError(
-                message="Resource has been exhausted (rate limit)",
+                message=f"Resource has been exhausted (rate limit) - attempt {self.call_count}",
                 retry_delay=self.retry_delay_seconds,
             )
 
         if self.should_return_malformed_json:
-            # Trả về JSON hỏng
             malformed_text = '{"title": "Quiz hỏng", "questions": [{"content": "Thiếu options"}'
             raise GeminiGatewayError(f"Phản hồi từ Gemini không đúng chuẩn JSON: {malformed_text}")
 
@@ -173,13 +209,27 @@ class FakeGemini(GeminiGatewayProtocol):
     async def generate_quiz_from_text(
         self, text_content: str, params: AiGenerationParams
     ) -> GeneratedQuizResponse:
-        return await self._execute_simulation(
-            source_info=f"text(len={len(text_content)})", params=params
-        )
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await self._execute_simulation(
+                    source_info=f"text(len={len(text_content)})", params=params
+                )
+            except GeminiRateLimitError as rle:
+                if attempt >= self.max_retries:
+                    raise
+                await asyncio.sleep(rle.retry_delay)
+        raise GeminiGatewayError("Đã hết số lần thử lại kết nối Gemini.")
 
     async def generate_quiz_from_file(
         self, file_bytes: bytes, mime_type: str, params: AiGenerationParams
     ) -> GeneratedQuizResponse:
-        return await self._execute_simulation(
-            source_info=f"file(bytes={len(file_bytes)}, mime={mime_type})", params=params
-        )
+        for attempt in range(self.max_retries + 1):
+            try:
+                return await self._execute_simulation(
+                    source_info=f"file(bytes={len(file_bytes)}, mime={mime_type})", params=params
+                )
+            except GeminiRateLimitError as rle:
+                if attempt >= self.max_retries:
+                    raise
+                await asyncio.sleep(rle.retry_delay)
+        raise GeminiGatewayError("Đã hết số lần thử lại kết nối Gemini.")
