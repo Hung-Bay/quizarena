@@ -37,6 +37,29 @@ async def list_by_owner(
     return result.scalars().all()
 
 
+async def list_public(
+    session: AsyncSession,
+    *,
+    skip: int = 0,
+    limit: int = 50,
+    tag: str | None = None,
+    search: str | None = None,
+) -> Sequence[Quiz]:
+    """Lấy danh sách Quiz công khai và đã xuất bản (QZ-5)."""
+    stmt = (
+        select(Quiz)
+        .where(Quiz.visibility == "public", Quiz.status == "published")
+        .options(selectinload(Quiz.questions))
+    )
+    if tag:
+        stmt = stmt.where(Quiz.tags.contains([tag]))
+    if search:
+        stmt = stmt.where(Quiz.title.ilike(f"%{search.strip()}%"))
+    stmt = stmt.order_by(Quiz.created_at.desc()).offset(skip).limit(limit)
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
 async def create(session: AsyncSession, quiz: Quiz) -> Quiz:
     """Tạo mới bộ Quiz."""
     session.add(quiz)

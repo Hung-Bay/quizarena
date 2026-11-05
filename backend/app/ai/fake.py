@@ -233,3 +233,42 @@ class FakeGemini(GeminiGatewayProtocol):
                     raise
                 await asyncio.sleep(rle.retry_delay)
         raise GeminiGatewayError("Đã hết số lần thử lại kết nối Gemini.")
+
+    async def regenerate_single_question(
+        self,
+        current_question: str,
+        current_options: list[str],
+        params: AiGenerationParams,
+        context: str | None = None,
+    ) -> QuestionDraft:
+        self.call_count += 1
+        q_type = (params.allowed_types or ["single"])[0]
+        if q_type == "true_false":
+            opts = [
+                QuestionOptionDraft(content="Đúng", is_correct=True),
+                QuestionOptionDraft(content="Sai", is_correct=False),
+            ]
+        elif q_type == "multiple":
+            opts = [
+                QuestionOptionDraft(content="Lựa chọn A được sinh lại", is_correct=True),
+                QuestionOptionDraft(content="Lựa chọn B được sinh lại", is_correct=True),
+                QuestionOptionDraft(content="Lựa chọn C sai", is_correct=False),
+                QuestionOptionDraft(content="Lựa chọn D sai", is_correct=False),
+            ]
+        else:
+            opts = [
+                QuestionOptionDraft(content="Đáp án đúng mới", is_correct=True),
+                QuestionOptionDraft(content="Phương án sai 1 mới", is_correct=False),
+                QuestionOptionDraft(content="Phương án sai 2 mới", is_correct=False),
+                QuestionOptionDraft(content="Phương án sai 3 mới", is_correct=False),
+            ]
+        return QuestionDraft(
+            content=f"Câu hỏi sinh lại: {current_question[:30]}...",
+            type=q_type,
+            options=opts,
+            explanation=f"Giải thích mới cho câu hỏi sinh lại ({params.difficulty})",
+            topic="Kiến thức cập nhật",
+            source_ref="Tài liệu tham khảo",
+            time_limit_s=20,
+            points=1000,
+        )

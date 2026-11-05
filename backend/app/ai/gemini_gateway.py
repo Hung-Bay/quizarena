@@ -22,6 +22,7 @@ from app.ai.schemas import (
     AiGenerationParams,
     GatewayUsage,
     GeneratedQuizResponse,
+    QuestionDraft,
     QuizDraft,
 )
 from app.core.config import Settings, get_settings
@@ -243,6 +244,73 @@ class GeminiGateway(GeminiGatewayProtocol):
                     model_name=self.model_name,
                 )
 
+            except TimeoutError as te:
+                raise TimeoutError(
+                    f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
+                ) from te
+            except Exception as e:
+                try:
+                    self._handle_exception(e)
+                except GeminiRateLimitError as rle:
+                    if attempt >= self.max_retries:
+                        raise
+                    delay = rle.retry_delay or (1.0 * (2**attempt))
+                    log.warning(
+                        "Gemini 429 Rate Limited (attempt %d/%d). Đang chờ %.2fs...",
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+
+        raise GeminiGatewayError("Đã hết số lần thử lại kết nối Gemini.")
+
+    async def regenerate_single_question(
+        self,
+        current_question: str,
+        current_options: list[str],
+        params: AiGenerationParams,
+        context: str | None = None,
+    ) -> QuestionDraft:
+        """Sinh lại một câu hỏi đơn lẻ bằng Gemini qua Structured Output (FR-AIGEN-09)."""
+        opts_str = "\n".join(f"- {o}" for o in current_options)
+        prompt = (
+            f"Hãy sinh lại một câu hỏi trắc nghiệm chất lượng cao thay thế cho câu hỏi sau:\n"
+            f"Câu hỏi cũ: {current_question}\n"
+            f"Các lựa chọn cũ:\n{opts_str}\n"
+            f"Yêu cầu:\n"
+            f"- Loại câu: {params.allowed_types[0] if params.allowed_types else 'single'}\n"
+            f"- Độ khó: {params.difficulty}\n"
+            f"- Ngôn ngữ: {'Tiếng Việt' if params.language == 'vi' else 'English'}\n"
+        )
+        if params.note:
+            prompt += f"- Ghi chú bổ sung từ người dùng: '''{params.note}'''\n"
+        if context:
+            prompt += f"- Ngữ cảnh tài liệu: '''{context}'''\n"
+
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=QuestionDraft,
+            system_instruction=_build_system_instruction(),
+            temperature=0.3,
+        )
+        loop = asyncio.get_running_loop()
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                res = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: self.client.models.generate_content(
+                            model=self.model_name,
+                            contents=[prompt],
+                            config=config,
+                        ),
+                    ),
+                    timeout=self.timeout_seconds,
+                )
+                raw_text = res.text or ""
+                return QuestionDraft.model_validate_json(raw_text)
             except TimeoutError as te:
                 raise TimeoutError(
                     f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"

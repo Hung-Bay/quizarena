@@ -3,19 +3,25 @@
 import uuid
 from collections.abc import Sequence
 
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.gateway_interface import GeminiGatewayProtocol
+from app.ai.schemas import AiGenerationParams
 from app.core.errors import AppError
 from app.core.rbac import RoleName
 from app.models.quiz import Question, QuestionOption, Quiz
 from app.repositories import quiz_repository as repo
 from app.schemas.quiz import (
     QuestionCreate,
+    QuestionRegenerateRequest,
     QuestionReorderRequest,
     QuestionUpdate,
+    QuizCloneRequest,
     QuizCreate,
     QuizUpdate,
 )
+from app.services.gemini_rate_limiter import acquire_gemini_permit
 from app.services.quiz_rules import validate_question_data, validate_quiz_for_publishing
 
 
@@ -324,3 +330,164 @@ async def reorder_questions(
     quiz_updated = await repo.get_by_id(session, quiz_id, include_questions=True)
     assert quiz_updated is not None
     return quiz_updated
+
+
+async def list_public_quizzes(
+    session: AsyncSession,
+    *,
+    skip: int = 0,
+    limit: int = 50,
+    tag: str | None = None,
+    search: str | None = None,
+) -> Sequence[Quiz]:
+    """Lấy danh sách các Quiz công khai và đã xuất bản (QZ-5)."""
+    return await repo.list_public(session, skip=skip, limit=limit, tag=tag, search=search)
+
+
+async def clone_quiz(
+    session: AsyncSession,
+    quiz_id: uuid.UUID,
+    user_id: uuid.UUID,
+    user_roles: Sequence[str],
+    data: QuizCloneRequest,
+) -> Quiz:
+    """Sao chép Quiz thành bản nháp mới thuộc sở hữu của người gọi (QZ-5)."""
+    original = await repo.get_by_id(session, quiz_id, include_questions=True)
+    if not original:
+        raise AppError("Quiz không tồn tại", code="QUIZ_NOT_FOUND", status_code=404)
+
+    is_admin = RoleName.ADMIN.value in user_roles
+    is_owner = original.owner_id == user_id
+    is_public = original.visibility == "public" and original.status == "published"
+
+    if not (is_admin or is_owner or is_public):
+        raise AppError(
+            "Quiz không tồn tại hoặc không ở chế độ công khai",
+            code="QUIZ_NOT_FOUND",
+            status_code=404,
+        )
+
+    new_title = data.title.strip() if data.title else f"Bản sao của {original.title}"
+    cloned_quiz = Quiz(
+        owner_id=user_id,
+        title=new_title,
+        description=original.description,
+        visibility="private",
+        status="draft",
+        version=1,
+        tags=list(original.tags or []),
+        play_count=0,
+    )
+    session.add(cloned_quiz)
+    await session.flush()
+
+    for q in original.questions:
+        cloned_q = Question(
+            quiz_id=cloned_quiz.id,
+            position=q.position,
+            type=q.type,
+            content=q.content,
+            explanation=q.explanation,
+            topic=q.topic,
+            time_limit_s=q.time_limit_s,
+            points=q.points,
+            source_ref=q.source_ref,
+            ai_generated=q.ai_generated,
+        )
+        session.add(cloned_q)
+        await session.flush()
+
+        for opt in q.options:
+            cloned_opt = QuestionOption(
+                question_id=cloned_q.id,
+                position=opt.position,
+                content=opt.content,
+                is_correct=opt.is_correct,
+            )
+            session.add(cloned_opt)
+
+    await session.flush()
+    return await repo.get_by_id(session, cloned_quiz.id, include_questions=True) or cloned_quiz
+
+
+async def regenerate_question(
+    session: AsyncSession,
+    redis: Redis,
+    gateway: GeminiGatewayProtocol,
+    quiz_id: uuid.UUID,
+    question_id: uuid.UUID,
+    user_id: uuid.UUID,
+    user_roles: Sequence[str],
+    data: QuestionRegenerateRequest,
+) -> Question:
+    """Yêu cầu AI sinh lại một câu hỏi cụ thể trong Quiz (FR-AIGEN-09)."""
+    quiz = await repo.get_by_id(session, quiz_id, include_questions=False)
+    _check_quiz_access(quiz, user_id, user_roles)
+
+    question = await repo.get_question(session, question_id, quiz_id=quiz_id)
+    if not question:
+        raise AppError(
+            "Câu hỏi không tồn tại trong quiz", code="QUESTION_NOT_FOUND", status_code=404
+        )
+
+    # Xin cấp permit từ rate limiter
+    await acquire_gemini_permit(redis, priority="high")
+
+    # Chuẩn bị tham số
+    target_type = data.type or question.type
+    ai_params = AiGenerationParams(
+        num_questions=1,
+        difficulty=data.difficulty or "medium",
+        allowed_types=[target_type],
+        note=data.notes,
+    )
+
+    current_opts = [opt.content for opt in question.options]
+    draft_q = await gateway.regenerate_single_question(
+        current_question=question.content,
+        current_options=current_opts,
+        params=ai_params,
+        context=question.source_ref,
+    )
+
+    # Validate Lớp 2 (Nghiệp vụ QZ-2)
+    options_data = [
+        {"content": opt.content, "is_correct": opt.is_correct} for opt in draft_q.options
+    ]
+    val_res = validate_question_data(
+        question_type=draft_q.type,
+        content=draft_q.content,
+        time_limit_s=draft_q.time_limit_s,
+        points=draft_q.points,
+        options=options_data,
+        source_ref=draft_q.source_ref,
+    )
+    if not val_res.is_valid:
+        raise AppError(
+            f"Câu hỏi sinh lại không hợp lệ theo quy tắc nghiệp vụ: {', '.join(val_res.errors)}",
+            code="INVALID_QUESTION_DATA",
+            status_code=422,
+        )
+
+    # Cập nhật câu hỏi
+    question.content = draft_q.content.strip()
+    question.type = draft_q.type
+    question.explanation = draft_q.explanation.strip() if draft_q.explanation else None
+    question.topic = draft_q.topic.strip() if draft_q.topic else None
+    question.time_limit_s = draft_q.time_limit_s
+    question.points = draft_q.points
+    question.ai_generated = True
+
+    new_opts = [
+        QuestionOption(
+            question_id=question.id,
+            position=idx,
+            content=opt.content.strip(),
+            is_correct=opt.is_correct,
+        )
+        for idx, opt in enumerate(draft_q.options, start=1)
+    ]
+    await repo.replace_question_options(session, question.id, new_opts)
+    await session.flush()
+    await session.refresh(question, ["options"])
+    return question

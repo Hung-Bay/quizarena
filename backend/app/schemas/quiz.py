@@ -83,6 +83,18 @@ class QuestionReorderRequest(BaseModel):
     )
 
 
+class QuestionRegenerateRequest(BaseModel):
+    """Schema yêu cầu AI sinh lại một câu hỏi (FR-AIGEN-09)."""
+
+    notes: str | None = Field(default=None, max_length=300, description="Chỉ dẫn thêm từ host")
+    difficulty: Literal["easy", "medium", "hard"] | None = Field(
+        default=None, description="Độ khó câu hỏi"
+    )
+    type: Literal["single", "multiple", "true_false"] | None = Field(
+        default=None, description="Loại câu hỏi"
+    )
+
+
 class QuizCreate(BaseModel):
     """Schema tạo Quiz mới."""
 
@@ -101,6 +113,14 @@ class QuizUpdate(BaseModel):
     description: str | None = None
     visibility: Literal["private", "unlisted", "public"] | None = None
     tags: list[str] | None = None
+
+
+class QuizCloneRequest(BaseModel):
+    """Schema yêu cầu sao chép bộ Quiz (QZ-5)."""
+
+    title: str | None = Field(
+        default=None, max_length=255, description="Tiêu đề mới cho quiz sao chép"
+    )
 
 
 class QuizResponse(BaseModel):

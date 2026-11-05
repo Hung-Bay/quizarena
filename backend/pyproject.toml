@@ -43,8 +43,14 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "ASYNC"]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "TID"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/ai/gemini_gateway.py" = ["TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"google.genai".msg = "SDK google-genai chỉ được phép import duy nhất tại app.ai.gemini_gateway (ADR-002, FR-AIGEN-12)."
 
 [tool.mypy]
 python_version = "3.12"

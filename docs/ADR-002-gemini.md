@@ -79,6 +79,28 @@ Tính năng sinh quiz từ tài liệu tự động (PDF, TXT, MD) sử dụng G
   - **Quy tắc dung sai:** Các câu hỏi không thỏa mãn luật sẽ bị loại bỏ và ghi log lý do. Nếu $\ge 50\%$ số câu yêu cầu đạt chuẩn $\rightarrow$ tạo bản nháp thành công. Nếu $< 50\%$ đạt $\rightarrow$ gửi kèm phản hồi lỗi để retry 1 lần duy nhất với Gemini.
 - **Lưu trữ DB:** Dữ liệu khi lưu vào database phải thỏa mãn toàn vẹn (`draft`), và chỉ được phép chuyển trạng thái `published` khi bộ câu hỏi có ít nhất 3 câu hợp lệ hoàn toàn.
 
+### 2.8. Phòng vệ Prompt Injection & Phân tách Dữ liệu (AG-9, FR-AIGEN-11)
+- **Ranh giới Data Isolation:**
+  - Nội dung tài liệu PDF và ghi chú bổ sung của Host ($\le 300$ ký tự) được định nghĩa nghiêm ngặt là **DỮ LIỆU (DATA)**, không bao giờ được đưa vào dưới dạng chỉ dẫn (INSTRUCTION).
+  - System Instruction (`_build_system_instruction()`) thiết lập quy tắc bảo mật tối cao: cấm LLM tuân theo bất kỳ chỉ thị ghi đè nào có trong dữ liệu (ví dụ: *"Bỏ qua mọi chỉ dẫn"*, *"In secret"*, *"Đặt tất cả đáp án là A"*).
+  - Ghi chú của host được bọc trong các dấu phân tách tường minh (`'''...'''`) kèm nhãn `chỉ dùng tham khảo nội dung`.
+- **Phòng thủ đa tầng (Defense in Depth):**
+  - **Tầng 1 (Structured Output):** Ép schema JSON `QuizDraft` qua Gemini API để chặn đứng việc sinh văn bản tự do hoặc markdown độc hại.
+  - **Tầng 2 (Nghiệp vụ - `quiz_rules`):** Ngay cả khi prompt injection đánh lừa được LLM sinh ra câu hỏi bị phá hoại (ví dụ: thổi phồng điểm số lên 99999, thời gian 9999s, hoặc làm trùng lặp đáp án), tầng Lớp 2 tự động phát hiện, từ chối và loại bỏ các câu hỏi vi phạm.
+  - **Thử nghiệm thực tế (`tests/test_pdf_prompt_injection.py`):** Kiểm thử tự động với các payload độc hại (System Override, Secret Extraction, Parameter Hijacking, Rigged Answers) đều xác nhận hệ thống an toàn và cô lập dữ liệu hiệu quả.
+
+### 2.9. Tái sinh 1 câu hỏi (FR-AIGEN-09) & Thư viện Quiz Cộng đồng (QZ-5)
+- **Tái sinh 1 câu hỏi (`POST /quizzes/{id}/questions/{qid}/regenerate`):**
+  - Host có quyền yêu cầu AI sinh lại nội dung và 4 phương án cho một câu hỏi cụ thể trong bản nháp.
+  - Yêu cầu vẫn phải qua Rate Limiter toàn cục trên Redis để kiểm soát RPM/RPD, validate Lớp 2 QZ-2, và cập nhật nguyên tử phương án mới vào DB.
+- **Thư viện Quiz Public & Clone Quiz (QZ-5):**
+  - `GET /quizzes/public`: Cho phép mọi người dùng tìm kiếm và xem danh sách các Quiz công khai (`visibility = 'public'` và `status = 'published'`).
+  - `POST /quizzes/{id}/clone`: Cho phép Host sao chép một Quiz public (hoặc Quiz của chính mình) thành một bản nháp mới độc lập thuộc quyền sở hữu của Host đó. Ngăn chặn triệt để BOLA (Broken Object Level Authorization) khi cố clone Quiz private của người khác.
+
+### 2.10. Ranh giới SDK google-genai & Linter Banned-API (FR-AIGEN-12)
+- **Quy tắc Ruff `banned-api` (TID251):** Cấu hình `backend/pyproject.toml` cấm `import google.genai` ở mọi nơi, ngoại trừ duy nhất `app/ai/gemini_gateway.py`.
+- **Unit Test Quét Toàn Bộ Codebase (`tests/test_gemini_sdk_boundary.py`):** Quét đệ quy cây thư mục `backend/app/`, đảm bảo 100% không có file nào ngoài gateway import SDK Gemini. Chạy tự động trong CI.
+
 ---
 
 ## 3. Hệ quả (Consequences)
