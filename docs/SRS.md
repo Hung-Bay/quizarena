@@ -6,6 +6,7 @@
 |---|---|---|---|
 | 0.1 | 25/10/2026 | Hùng | Baseline cuối Phase 0: mục 1–3 (giới thiệu, mô tả tổng quan, yêu cầu chức năng). Mục 4–8 để trống, bổ sung ở các phase sau |
 | 0.2 | 03/11/2026 | Hùng | Cập nhật Phase 1: Thêm sơ đồ trình tự xác thực, refresh rotation, guest token, ws-ticket (Mục 7) và Ma trận truy vết RTM cho Auth/RBAC (Mục 8) |
+| 0.3 | 05/11/2026 | Hùng | Cập nhật Phase 2: Pipeline AI Sinh Quiz (Gemini, ARQ, SSE), Rate Limiting (Redis Lua), Caching, 2-Layer Validation, Chống Prompt Injection, CRUD Quiz & Bộ luật QZ-2/3, Public/Clone Quiz (QZ-5) |
 
 **Mục lục:** 1. Giới thiệu · 2. Mô tả tổng quan · 3. Yêu cầu chức năng · 4. Yêu cầu giao diện ngoài · 5. Yêu cầu phi chức năng · 6. Yêu cầu dữ liệu · 7. Use case & Sequence Diagrams · 8. Ma trận truy vết (RTM) · Phụ lục A (ma trận quyền) · Phụ lục B (đối chiếu đề bài)
 
@@ -606,7 +607,60 @@ sequenceDiagram
 
 ---
 
-## 8. Ma trận truy vết yêu cầu (Traceability Matrix - RTM cho Phase 1)
+### 7.5. Luồng Sinh Quiz bằng AI & Caching (AG-1...11, QZ-2, QZ-3)
+
+```mermaid
+sequenceDiagram
+    participant H as Host
+    participant A as API Server
+    participant DB as Postgres
+    participant R as Redis
+    participant W as ARQ Worker
+    participant G as Gemini Gateway
+
+    H->>A: POST /ai/quiz-generations (File PDF <= 10MB, params)
+    A->>A: Validate magic bytes, đếm số trang <= 30, tính SHA-256
+    A->>R: Kiểm tra quota Host/ngày (5 lần/ngày)
+    alt Cache Hit (sha256 + params_hash)
+        A->>DB: Lấy QuizDraft cũ, nhân bản Quiz nháp mới cho Host
+        A-->>H: 202 {job_id, cache_hit: true} (0 lần gọi Gemini)
+    else Cache Miss
+        A->>DB: Lưu documents & ai_jobs (status="queued")
+        A->>R: Enqueue job vào ARQ Queue
+        A-->>H: 202 {job_id, cache_hit: false} (< 500 ms)
+    end
+
+    H->>A: GET /ai-jobs/{id}/events (SSE, Bearer token)
+    A-->>H: SSE event: {status: "queued"}
+
+    W->>R: Dequeue job
+    W->>R: Publish status="running" tới ai:job:{id}
+    R-->>A: PubSub message
+    A-->>H: SSE event: {status: "running"}
+
+    W->>R: Lua Script xin Permit (Token Bucket RPM & RPD Pacific)
+    W->>G: generate_quiz_from_file(file, params)
+    alt Gemini 429
+        G->>G: Đọc retryDelay, backoff và thử lại tối đa 3 lần
+    end
+    G-->>W: QuizDraft (JSON Structured Output)
+
+    W->>W: Validate 2 lớp (Lớp 1: Pydantic, Lớp 2: quiz_rules QZ-2)
+    alt Hợp lệ >= 50%
+        W->>DB: Lưu bản nháp Quiz, Questions, Options vào DB
+        W->>R: Publish status="succeeded", quiz_id
+        R-->>A: PubSub message
+        A-->>H: SSE event: {status: "succeeded", quiz_id}
+    else Hợp lệ < 50%
+        W->>G: Retry sinh lại 1 lần với feedback lỗi
+    end
+```
+
+---
+
+## 8. Ma trận truy vết yêu cầu (Traceability Matrix - RTM)
+
+### 8.1. Phase 1 — Xác thực & Phân quyền (Auth & RBAC)
 
 | Req ID | Mô tả yêu cầu | API / CLI Endpoint | Test Case / Bằng chứng xác minh | Trạng thái |
 |---|---|---|---|:---:|
@@ -623,6 +677,31 @@ sequenceDiagram
 | **FR-AUTH-11** | WebSocket ticket dùng 1 lần (TTL 30s, GETDEL) | `POST /realtime/ws-ticket` | `test_guest_and_ticket.py::test_ws_ticket_thanh_cong_va_doi_bang_getdel_dung_lan_2_that_bai`<br/>`test_ws_ticket_khong_ton_tai_hoac_qua_30_giay_that_bai` | ✅ Done |
 | **FR-AUTHZ-01** | Ma trận RBAC 4 vai trò × 10 quyền | `Depends(require_permissions)` | `test_rbac_matrix.py::test_rbac_matrix_du_4_vai_tro_x_10_quyen` (40 tests) | ✅ Done |
 | **FR-ADM-06** | CLI quản trị (`seed`, `create-admin`) | `app.cli` | `test_cli.py::test_help_liet_ke_lenh_seed`<br/>`test_cli.py::test_create_admin_mat_khau_yeu_bi_tu_choi`<br/>`test_rbac_seed.py::test_seed_idempotent_va_dung_ma_tran` | ✅ Done |
+
+### 8.2. Phase 2 — Quản lý Quiz & AI Quiz Generation Pipeline
+
+| Req ID | Mô tả yêu cầu | API / CLI / Module | Test Case / Bằng chứng xác minh | Trạng thái |
+|---|---|---|---|:---:|
+| **FR-QUIZ-01** | Tạo, xem, cập nhật, xóa Quiz (chủ sở hữu) | `POST, GET, PATCH, DELETE /api/v1/quizzes` | `test_quiz_flow.py::test_crud_quiz_thanh_cong`<br/>`test_quiz_flow.py::test_host_b_truy_cap_quiz_host_a_tra_404_bola` | ✅ Done |
+| **FR-QUIZ-02** | Thêm câu hỏi (3 loại: single, multiple, true_false) | `POST /quizzes/{id}/questions` | `test_quiz_flow.py::test_them_cau_hoi_hop_le_3_loai`<br/>`test_quiz_rules.py` (33 tests chi tiết) | ✅ Done |
+| **FR-QUIZ-03** | Bộ luật câu hỏi (thời gian 5-60s, điểm 500/1000/2000, không trùng phương án) | `app.services.quiz_rules` | `test_quiz_rules.py::test_validate_single_options`<br/>`test_quiz_rules.py::test_validate_true_false` | ✅ Done |
+| **FR-QUIZ-04** | Đổi thứ tự câu hỏi trong Quiz | `PUT /quizzes/{id}/questions/reorder` | `test_quiz_flow.py::test_doi_thu_tu_cau_hoi_thanh_cong` | ✅ Done |
+| **FR-QUIZ-05** | Xuất bản Quiz ($\ge 3$ câu hỏi hợp lệ) | `POST /quizzes/{id}/publish` | `test_quiz_flow.py::test_xuat_ban_quiz_thanh_cong_khi_du_3_cau`<br/>`test_quiz_flow.py::test_xuat_ban_quiz_that_bai_khi_duoi_3_cau` | ✅ Done |
+| **FR-QUIZ-07** | Thư viện Quiz Public (`GET /quizzes/public`) | `GET /api/v1/quizzes/public` | `test_quiz_clone_and_regenerate.py::test_list_public_quizzes_filtering` | ✅ Done |
+| **FR-QUIZ-08** | Nhân bản Quiz (`POST /quizzes/{id}/clone`) | `POST /api/v1/quizzes/{id}/clone` | `test_quiz_clone_and_regenerate.py::test_quiz_clone_flow` | ✅ Done |
+| **FR-AIGEN-01** | Upload tài liệu (magic bytes, $\le 10$ MB, $\le 30$ trang) trả `202 < 500 ms` | `POST /ai/quiz-generations` | `test_ai_job_flow.py::test_upload_pdf_success_and_timing_under_500ms`<br/>`test_document_service.py` | ✅ Done |
+| **FR-AIGEN-02** | Giới hạn quota sinh quiz của Host theo ngày ($N$ lần/ngày) | `app.services.quota_service` | `test_ai_job_flow.py::test_host_daily_quota_limit_exceeded` | ✅ Done |
+| **FR-AIGEN-03** | Server-Sent Events cập nhật trạng thái job (`queued → running → succeeded`) | `GET /ai-jobs/{id}/events` | `test_ai_job_flow.py::test_sse_event_stream_flow` | ✅ Done |
+| **FR-AIGEN-04** | Kiểm tra Lớp 1 (Pydantic Schema `QuizDraft`) | `app.ai.schemas` | `test_ai_retry_and_validation.py::test_layer1_pydantic_schema_validation` | ✅ Done |
+| **FR-AIGEN-05** | Kiểm tra Lớp 2 (Nghiệp vụ `quiz_rules`), lọc câu lỗi kèm lý do | `app.worker` | `test_ai_retry_and_validation.py::test_layer2_validation_filters_invalid_questions` | ✅ Done |
+| **FR-AIGEN-06** | Tự động retry 1 lần khi tỷ lệ hợp lệ $< 50\%$ | `app.worker` | `test_ai_retry_and_validation.py::test_retry_when_valid_questions_below_50_percent` | ✅ Done |
+| **FR-AIGEN-07** | Lưu bản nháp Quiz (`status='draft'`) sau khi AI sinh thành công | `app.worker` | `test_ai_job_flow.py::test_worker_execution_and_draft_persistence` | ✅ Done |
+| **FR-AIGEN-09** | Sinh lại 1 câu hỏi cụ thể bằng AI | `POST /quizzes/{id}/questions/{qid}/regenerate` | `test_quiz_clone_and_regenerate.py::test_regenerate_question_flow` | ✅ Done |
+| **FR-AIGEN-10** | Content Caching (trùng file + params $\rightarrow$ 0 lần gọi Gemini, không trừ quota) | `app.services.ai_job_service` | `test_content_caching.py::test_content_caching_full_flow` | ✅ Done |
+| **FR-AIGEN-11** | Chống PDF Prompt Injection & Data Isolation | `app.ai.gemini_gateway`, `app.worker` | `test_pdf_prompt_injection.py` (5 tests) | ✅ Done |
+| **FR-AIGEN-12** | Redis Lua Rate Limiter (RPM & RPD Pacific), FakeGemini 429 backoff, Cấm SDK ngoài gateway | `gemini_rate_limiter.py`, `pyproject.toml` | `test_gemini_rate_limiter.py`<br/>`test_gemini_sdk_boundary.py` | ✅ Done |
+| **FR-AIGEN-13** | CLI tra cứu hạn mức Gemini (`gemini-quota`) | `app.cli` (`gemini-quota`) | `test_cli.py::test_gemini_quota_in_thong_tin` | ✅ Done |
+
 
 
 ---

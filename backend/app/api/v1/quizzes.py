@@ -4,17 +4,21 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Response, status
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_session, require_permissions
+from app.ai.gateway_interface import GeminiGatewayProtocol
+from app.api.deps import get_gemini_gateway, get_redis, get_session, require_permissions
 from app.core.rbac import PermissionCode
 from app.models.quiz import Question, Quiz
 from app.schemas.quiz import (
     QuestionCreate,
     QuestionOptionResponse,
+    QuestionRegenerateRequest,
     QuestionReorderRequest,
     QuestionResponse,
     QuestionUpdate,
+    QuizCloneRequest,
     QuizCreate,
     QuizDetailResponse,
     QuizResponse,
@@ -31,6 +35,9 @@ DatabaseSession = Annotated[AsyncSession, Depends(get_session)]
 
 
 def _to_question_response(q: Question) -> QuestionResponse:
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
     return QuestionResponse(
         id=q.id,
         quiz_id=q.quiz_id,
@@ -42,8 +49,8 @@ def _to_question_response(q: Question) -> QuestionResponse:
         explanation=q.explanation,
         topic=q.topic,
         source_ref=q.source_ref,
-        ai_generated=q.ai_generated,
-        created_at=q.created_at,
+        ai_generated=bool(q.ai_generated),
+        created_at=q.created_at if q.created_at is not None else now,
         options=[
             QuestionOptionResponse(
                 id=opt.id,
@@ -57,6 +64,9 @@ def _to_question_response(q: Question) -> QuestionResponse:
 
 
 def _to_quiz_response(quiz: Quiz) -> QuizResponse:
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
     q_count = len(quiz.questions) if "questions" in quiz.__dict__ and quiz.questions else 0
     return QuizResponse(
         id=quiz.id,
@@ -65,16 +75,19 @@ def _to_quiz_response(quiz: Quiz) -> QuizResponse:
         description=quiz.description,
         visibility=quiz.visibility,
         status=quiz.status,
-        version=quiz.version,
-        tags=quiz.tags,
-        play_count=quiz.play_count,
+        version=quiz.version if quiz.version is not None else 1,
+        tags=quiz.tags or [],
+        play_count=quiz.play_count if quiz.play_count is not None else 0,
         question_count=q_count,
-        created_at=quiz.created_at,
-        updated_at=quiz.updated_at,
+        created_at=quiz.created_at if quiz.created_at is not None else now,
+        updated_at=quiz.updated_at if quiz.updated_at is not None else now,
     )
 
 
 def _to_quiz_detail_response(quiz: Quiz) -> QuizDetailResponse:
+    from datetime import UTC, datetime
+
+    now = datetime.now(UTC)
     questions = [_to_question_response(q) for q in (quiz.questions or [])]
     return QuizDetailResponse(
         id=quiz.id,
@@ -83,12 +96,12 @@ def _to_quiz_detail_response(quiz: Quiz) -> QuizDetailResponse:
         description=quiz.description,
         visibility=quiz.visibility,
         status=quiz.status,
-        version=quiz.version,
-        tags=quiz.tags,
-        play_count=quiz.play_count,
+        version=quiz.version if quiz.version is not None else 1,
+        tags=quiz.tags or [],
+        play_count=quiz.play_count if quiz.play_count is not None else 0,
         question_count=len(questions),
-        created_at=quiz.created_at,
-        updated_at=quiz.updated_at,
+        created_at=quiz.created_at if quiz.created_at is not None else now,
+        updated_at=quiz.updated_at if quiz.updated_at is not None else now,
         questions=questions,
     )
 
@@ -117,6 +130,22 @@ async def list_quizzes(
     user_id = uuid.UUID(claims["sub"])
     async with session.begin():
         quizzes = await quiz_service.list_user_quizzes(session, user_id, skip=skip, limit=limit)
+    return [_to_quiz_response(q) for q in quizzes]
+
+
+@router.get("/public", response_model=list[QuizResponse])
+async def list_public_quizzes(
+    session: DatabaseSession,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    tag: str | None = Query(None),
+    search: str | None = Query(None),
+) -> list[QuizResponse]:
+    """Lấy danh sách các Quiz công khai và đã xuất bản (QZ-5)."""
+    async with session.begin():
+        quizzes = await quiz_service.list_public_quizzes(
+            session, skip=skip, limit=limit, tag=tag, search=search
+        )
     return [_to_quiz_response(q) for q in quizzes]
 
 
@@ -253,3 +282,49 @@ async def delete_question(
     async with session.begin():
         await quiz_service.delete_question(session, id, qid, user_id, user_roles)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{id}/clone", response_model=QuizDetailResponse, status_code=status.HTTP_201_CREATED)
+async def clone_quiz(
+    id: uuid.UUID,
+    body: QuizCloneRequest,
+    claims: RequireQuizWrite,
+    session: DatabaseSession,
+) -> QuizDetailResponse:
+    """Sao chép Quiz thành bản nháp mới thuộc sở hữu của người gọi (QZ-5)."""
+    user_id = uuid.UUID(claims["sub"])
+    user_roles = claims.get("roles", [])
+    async with session.begin():
+        cloned = await quiz_service.clone_quiz(session, id, user_id, user_roles, body)
+    return _to_quiz_detail_response(cloned)
+
+
+@router.post(
+    "/{id}/questions/{qid}/regenerate",
+    response_model=QuestionResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def regenerate_question(
+    id: uuid.UUID,
+    qid: uuid.UUID,
+    body: QuestionRegenerateRequest,
+    claims: RequireQuizWrite,
+    session: DatabaseSession,
+    redis: Annotated[Redis, Depends(get_redis)],
+    gateway: Annotated[GeminiGatewayProtocol, Depends(get_gemini_gateway)],
+) -> QuestionResponse:
+    """Yêu cầu AI sinh lại một câu hỏi cụ thể trong Quiz (FR-AIGEN-09)."""
+    user_id = uuid.UUID(claims["sub"])
+    user_roles = claims.get("roles", [])
+    async with session.begin():
+        question = await quiz_service.regenerate_question(
+            session=session,
+            redis=redis,
+            gateway=gateway,
+            quiz_id=id,
+            question_id=qid,
+            user_id=user_id,
+            user_roles=user_roles,
+            data=body,
+        )
+    return _to_question_response(question)

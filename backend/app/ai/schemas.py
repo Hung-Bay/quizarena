@@ -60,7 +60,7 @@ class QuizDraft(BaseModel):
 class AiGenerationParams(BaseModel):
     """Tham số đầu vào khi Host yêu cầu sinh quiz từ tài liệu (AG-2)."""
 
-    num_questions: int = Field(default=5, ge=5, le=20, description="Số câu hỏi mong muốn (5 - 20)")
+    num_questions: int = Field(default=5, ge=1, le=20, description="Số câu hỏi mong muốn (1 - 20)")
     difficulty: Literal["easy", "medium", "hard"] = Field(
         default="medium", description="Độ khó câu hỏi"
     )

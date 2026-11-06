@@ -11,7 +11,7 @@
 |---|---|---|:---:|:---:|
 | **P0** | Thiết kế & Khung hạ tầng | Docker compose, CI/CD, Nginx, Healthz, WS Echo, SRS v0.1 | ✅ Hoàn thành | Tuần 1 |
 | **P1** | Auth, RBAC, Guest Token | JWT rotation, Reuse detection, RBAC 4x10, Guest token, WS ticket, ADR-001 | ✅ Hoàn thành | Tuần 2 |
-| **P2** | Quiz Authoring + AI Sinh Quiz | CRUD quiz, PDF upload, Gemini Gateway, Quota rate limiter, SSE | 🟡 Đang thực hiện | Tuần 3 |
+| **P2** | Quiz Authoring + AI Sinh Quiz | CRUD quiz, PDF upload, Gemini Gateway, Quota rate limiter, SSE | ✅ Hoàn thành | Tuần 3 |
 | **P3** | Live Game Engine | State machine, Redis Lua atomic, Leaderboard ZSET, Game clock, Write-behind | ⏳ Chưa bắt đầu | Tuần 4 |
 | **P4** | Frontend + AI Báo cáo sau trận | React FE, 1 call Gemini/game, Báo cáo cá nhân, Degraded mode | ⏳ Chưa bắt đầu | Tuần 5 |
 | **P5** | Scale Realtime & Nginx Gateway | Scale replica, Redis Pub/Sub, Loadtest 300 bots, Anti-cheat | ⏳ Chưa bắt đầu | Tuần 6 |
@@ -54,6 +54,34 @@
   - **Validate 2 lớp & Cơ chế Retry (FR-AIGEN-04...06):** Lớp 1 (Pydantic QuizDraft schema validation); Lớp 2 (Nghiệp vụ QZ-2). Nếu số câu hợp lệ $< 50\%$ số lượng yêu cầu $\to$ worker tự động gọi retry 1 lần với Gemini kèm feedback danh sách lỗi để sửa.
   - **Content Caching (AG-8, FR-AIGEN-10):** Tra cứu theo `sha256(file) + params_hash`. Khi Cache Hit: sao chép câu hỏi thành bộ Quiz riêng biệt thuộc quyền sở hữu của Host yêu cầu (ASM-2), 0 lần gọi Gemini (call_count không đổi), không tốn quota của host, đánh dấu `ai_jobs.cache_hit = True` (chứng minh bằng một câu lệnh SQL). Viết test `test_content_caching.py` kiểm chứng toàn diện.
   - Bộ test tăng lên **165 passed**, 39 skipped, 0 failed. Mypy sạch 100% (61 source files).
+
+- **Thứ Sáu (Banned-API, Boundary Grep, Tái sinh câu, Thư viện Public/Clone, PDF Prompt Injection, Hoàn thiện tài liệu):**
+  - **Luật cấm import SDK ngoài gateway (FR-AIGEN-12):** Cấu hình Ruff `banned-api` (rule `TID251` từ `flake8-tidy-imports`) trong `pyproject.toml` cấm triệt để `google.genai` bên ngoài `app/ai/gemini_gateway.py`. Viết unit test `tests/test_gemini_sdk_boundary.py` quét đệ quy toàn bộ thư mục `backend/app/`, đảm bảo 100% không có file nào import lén lút SDK.
+  - **Sinh lại 1 câu hỏi cụ thể bằng AI (FR-AIGEN-09):** Triển khai endpoint `POST /api/v1/quizzes/{id}/questions/{qid}/regenerate`, gọi `regenerate_single_question` qua Gemini Gateway với Structured Output `QuestionDraft`, xin permit từ Redis limiter, validate Lớp 2 QZ-2 và thay thế phương án cũ an toàn.
+  - **Thư viện Quiz Public & Clone Quiz (QZ-5 / FR-QUIZ-07, 08):**
+    - `GET /api/v1/quizzes/public`: Xem danh sách quiz công khai (`visibility = 'public'` và `status = 'published'`), hỗ trợ lọc theo tag và tìm kiếm theo tiêu đề.
+    - `POST /api/v1/quizzes/{id}/clone`: Cho phép Host nhân bản một Quiz public hoặc Quiz của chính mình thành bản nháp mới độc lập. Kiểm tra chặn BOLA 404 khi cố clone quiz private của người khác. Viết 3 unit tests chi tiết (`test_quiz_clone_and_regenerate.py`).
+  - **Phòng vệ PDF Prompt Injection (AG-9, FR-AIGEN-11):** Xây dựng bộ test `tests/test_pdf_prompt_injection.py` (5 tests) mô phỏng các kỹ thuật tấn công: Direct System Override, Secret Leaking, Parameter Hijacking qua Host Note, và Rigged Answers. Kiểm chứng khả năng phân định ranh giới Dữ liệu (Data Isolation) và tầng bảo vệ Lớp 2 (`quiz_rules`) lọc bỏ hoàn toàn các câu hỏi bị phá hoại.
+  - **Cập nhật tài liệu:** Bổ sung các quyết định bảo vệ injection, ranh giới banned-api và clone quiz vào `docs/ADR-002-gemini.md`. Cập nhật `docs/SRS.md` lên phiên bản `v0.3` kèm sơ đồ tuần tự AI Pipeline và ma trận truy vết RTM cho toàn bộ yêu cầu Phase 2.
+  - Bộ test tăng lên **174 passed**, 39 skipped, 0 failed (213 tests tổng cộng). Mypy sạch 100% (67 source files).
+
+---
+
+## Bảng đối chiếu tiêu chí nghiệm thu Phase 2 (§8)
+
+| Tiêu chí nghiệm thu Phase 2 | Mức độ | Yêu cầu SRS | Kết quả đạt được | Bằng chứng kiểm thử / Xác minh |
+|---|:---:|:---:|:---:|---|
+| **CRUD quiz/câu hỏi, host B truy cập quiz của host A $\to$ 404; xuất bản chỉ khi hợp lệ** | Bắt buộc | FR-QUIZ-01...05, FR-AUTHZ-03 | ✅ Đạt | `test_quiz_flow.py::test_host_b_truy_cap_quiz_host_a_tra_404_bola`<br/>`test_quiz_flow.py::test_xuat_ban_quiz_that_bai_khi_duoi_3_cau` |
+| **Upload PDF trả 202 trong < 500 ms; SSE thấy queued $\to$ running $\to$ succeeded** | Bắt buộc | FR-AIGEN-01...03 | ✅ Đạt | `test_ai_job_flow.py::test_upload_pdf_success_and_timing_under_500ms`<br/>`test_ai_job_flow.py::test_sse_event_stream_flow` |
+| **Quiz AI qua 2 lớp validate; câu lỗi bị loại kèm lý do** | Bắt buộc | FR-AIGEN-04...06 | ✅ Đạt | `test_ai_retry_and_validation.py::test_layer2_validation_filters_invalid_questions` |
+| **Upload lại cùng file + tham số $\to$ không gọi Gemini (chứng minh bằng log/metric)** | Bắt buộc | FR-AIGEN-10 | ✅ Đạt | `test_content_caching.py::test_content_caching_full_flow`<br/>`ai_jobs.cache_hit = true`, 0 lần gọi Gemini |
+| **Chạy 2 worker, bắn 30 job $\to$ số request/phút tới Gemini không vượt cấu hình** | Bắt buộc | FR-AIGEN-12 | ✅ Đạt | `test_gemini_rate_limiter.py::test_two_workers_concurrent_30_jobs_rate_limiting` |
+| **FakeGemini giả lập 429 và JSON hỏng, hệ thống xử lý đúng (test)** | Bắt buộc | FR-AIGEN-12 | ✅ Đạt | `test_ai_retry_and_validation.py::test_fake_gemini_429_retry_and_exhaustion`<br/>`test_fake_gemini_malformed_json_handling` |
+| **Không còn chỗ nào import SDK Gemini ngoài gateway (kiểm tra bằng grep hoặc lint rule)** | Bắt buộc | FR-AIGEN-12 | ✅ Đạt | Ruff `banned-api` (rule TID251) trong `pyproject.toml`<br/>`test_gemini_sdk_boundary.py` quét toàn bộ codebase |
+| **Sinh lại 1 câu hỏi cụ thể bằng AI** | Nên có | FR-AIGEN-09 | ✅ Đạt | `test_quiz_clone_and_regenerate.py::test_regenerate_question_flow` |
+| **Thử PDF prompt injection và ghi nhận kết quả** | Nên có | FR-AIGEN-11 | ✅ Đạt | `test_pdf_prompt_injection.py` (5 tests), ghi nhận trong `docs/ADR-002-gemini.md` |
+| **Thư viện Quiz Public & Clone Quiz** | QZ-5 | FR-QUIZ-07, 08 | ✅ Đạt | `test_quiz_clone_and_regenerate.py::test_list_public_quizzes_filtering`<br/>`test_quiz_clone_and_regenerate.py::test_quiz_clone_flow` |
+| **Tài liệu ADR-002, SRS v0.3, PROGRESS.md** | Tài liệu | ADR-002 | ✅ Đạt | `docs/ADR-002-gemini.md`, `docs/SRS.md` v0.3, `docs/PROGRESS.md` |
 
 ---
 

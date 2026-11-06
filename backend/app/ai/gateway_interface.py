@@ -6,7 +6,7 @@ tuyệt đối không import trực tiếp SDK `google.genai` ra ngoài gateway.
 
 from typing import Any, Protocol, runtime_checkable
 
-from app.ai.schemas import AiGenerationParams, GeneratedQuizResponse
+from app.ai.schemas import AiGenerationParams, GeneratedQuizResponse, QuestionDraft
 
 
 @runtime_checkable
@@ -27,4 +27,14 @@ class GeminiGatewayProtocol(Protocol):
         self, file_bytes: bytes, mime_type: str, params: AiGenerationParams
     ) -> GeneratedQuizResponse:
         """Sinh bộ câu hỏi từ tài liệu nhị phân (PDF, TXT, MD)."""
+        ...
+
+    async def regenerate_single_question(
+        self,
+        current_question: str,
+        current_options: list[str],
+        params: AiGenerationParams,
+        context: str | None = None,
+    ) -> QuestionDraft:
+        """Sinh lại một câu hỏi đơn lẻ dựa trên câu hỏi cũ và tham số bổ sung (FR-AIGEN-09)."""
         ...

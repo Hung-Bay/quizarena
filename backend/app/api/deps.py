@@ -8,11 +8,18 @@ from fastapi import Depends, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.gateway_interface import GeminiGatewayProtocol
+from app.ai.gemini_gateway import create_gemini_gateway
 from app.core import security
 from app.core.errors import AppError
 from app.core.rbac import PermissionCode
 from app.models import User
 from app.repositories import user_repository as users
+
+
+def get_gemini_gateway() -> GeminiGatewayProtocol:
+    """Khởi tạo hoặc cung cấp Gemini Gateway Adapter."""
+    return create_gemini_gateway()
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
