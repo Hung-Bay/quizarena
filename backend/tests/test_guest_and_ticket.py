@@ -1,10 +1,11 @@
 """Test Guest token (POST /games/join) và WebSocket ticket (POST /realtime/ws-ticket) (AU-9, AU-10, AU-11)."""
 
+from __future__ import annotations
+
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
-from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import Depends
@@ -18,6 +19,23 @@ from app.main_api import app
 
 # Sử dụng in-memory dict để giả lập Redis phục vụ test độc lập
 redis_store: dict[str, Any] = {}
+
+
+class FakePipeline:
+    def __init__(self, r: FakeRedis) -> None:
+        self.r = r
+
+    def hset(self, *args: Any, **kwargs: Any) -> FakePipeline:
+        return self
+
+    def expire(self, *args: Any, **kwargs: Any) -> FakePipeline:
+        return self
+
+    def zadd(self, *args: Any, **kwargs: Any) -> FakePipeline:
+        return self
+
+    async def execute(self) -> list[Any]:
+        return []
 
 
 class FakeRedis:
@@ -39,9 +57,53 @@ class FakeRedis:
     async def delete(self, key: str) -> None:
         self.store.pop(key, None)
 
+    async def hgetall(self, key: str) -> dict[str, str]:
+        return {"status": "lobby"}
 
-async def fake_get_session() -> AsyncIterator[AsyncMock]:
-    yield AsyncMock()
+    async def hget(self, key: str, field: str) -> str | None:
+        return None
+
+    async def hlen(self, key: str) -> int:
+        return 0
+
+    async def hset(self, *args: Any, **kwargs: Any) -> int:
+        return 1
+
+    async def zadd(self, *args: Any, **kwargs: Any) -> int:
+        return 1
+
+    async def publish(self, channel: str, message: str) -> int:
+        return 1
+
+    def pipeline(self) -> FakePipeline:
+        return FakePipeline(self)
+
+
+class FakeSession:
+    def begin(self):
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _ctx():
+            yield self
+
+        return _ctx()
+
+    async def flush(self) -> None:
+        pass
+
+    async def refresh(self, obj: Any, attrs: Any = None) -> None:
+        pass
+
+    def add(self, obj: Any) -> None:
+        pass
+
+    async def get(self, entity: Any, ident: Any) -> Any:
+        return None
+
+
+async def fake_get_session() -> AsyncIterator[FakeSession]:
+    yield FakeSession()
 
 
 fake_redis = FakeRedis()
