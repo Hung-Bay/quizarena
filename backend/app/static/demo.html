@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuizArena — Live Game Engine Demo (2 Tabs: Host & Player)</title>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-card: #1e293b;
+      --bg-card-hover: #334155;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --accent: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      padding: 16px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: #818cf8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background-color: #312e81;
+      color: #c7d2fe;
+    }
+
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    .card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .card-header {
+      font-size: 1.1rem;
+      font-weight: 600;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: var(--danger);
+      display: inline-block;
+      margin-right: 6px;
+    }
+    .status-dot.online { background-color: var(--accent); }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    label { font-size: 0.8rem; color: var(--text-muted); }
+
+    input, select {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      color: var(--text-main);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    input:focus { outline: 1px solid var(--primary); }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover:not(:disabled) { background-color: var(--primary-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.btn-accent { background-color: var(--accent); }
+    button.btn-accent:hover:not(:disabled) { background-color: #059669; }
+    button.btn-danger { background-color: var(--danger); }
+    button.btn-danger:hover:not(:disabled) { background-color: #dc2626; }
+    button.btn-secondary { background-color: var(--bg-card-hover); }
+
+    .log-box {
+      background-color: #0b1120;
+      border: 1px solid #1e293b;
+      border-radius: 6px;
+      padding: 8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.75rem;
+      height: 180px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .question-box {
+      background: #1e1b4b;
+      border: 1px solid #4338ca;
+      border-radius: 8px;
+      padding: 12px;
+    }
+
+    .question-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .options-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .option-btn {
+      background-color: var(--bg-card-hover);
+      text-align: left;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .option-btn:hover { background-color: #475569; }
+    .option-btn.selected {
+      border-color: #a855f7;
+      background-color: #581c87;
+    }
+
+    .timer-badge {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fbbf24;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>QuizArena Live Engine <span class="badge">Phase 3 — WebSocket Demo</span></h1>
+    <div>
+      <span style="font-size: 0.85rem; color: var(--text-muted);">WS Protocol v1 (FR-GAME-01..22)</span>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- CỘT 1: HOST CONTROLLER -->
+    <div class="card">
+      <div class="card-header">
+        <div><span class="status-dot" id="hostDot"></span>Host Điều Khiển</div>
+        <span id="hostStatusText" class="badge">CHƯA KẾT NỐI</span>
+      </div>
+
+      <div class="form-group">
+        <label>Game ID (UUID của trận đấu)</label>
+        <input type="text" id="hostGameId" placeholder="Ví dụ: b886a147-380b-4876-96ef-c88c95a6f272">
+      </div>
+
+      <div class="form-group">
+        <label>Mã PIN trận đấu</label>
+        <input type="text" id="hostPin" placeholder="Ví dụ: 829103">
+      </div>
+
+      <div class="form-group">
+        <label>Host Access Token (chứa quyền game:host_own)</label>
+        <input type="text" id="hostToken" placeholder="Dán Bearer token của Host vào đây">
+      </div>
+
+      <div class="btn-row">
+        <button id="btnHostConnect" class="btn-accent" onclick="hostConnect()">1. Đổi Ticket & Kết Nối Host WS</button>
+        <button id="btnHostDisconnect" class="btn-secondary" onclick="hostDisconnect()" disabled>Ngắt kết nối</button>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid var(--border);">
+
+      <div class="card-header" style="font-size: 0.95rem;">Lệnh Điều Khiển Trận Đấu</div>
+      <div class="btn-row">
+        <button id="btnGameStart" onclick="hostGameStart()" disabled>Bắt đầu (game.start)</button>
+        <button id="btnGameNext" onclick="hostGameNext()" disabled>Câu tiếp theo (game.next)</button>
+        <button id="btnGameEnd" class="btn-danger" onclick="hostGameEnd()" disabled>Kết thúc (game.end)</button>
+      </div>
+
+      <div class="form-group" style="margin-top: 4px;">
+        <label>Kick người chơi (Player ID UUID)</label>
+        <div style="display: flex; gap: 8px;">
+          <input type="text" id="kickPlayerId" placeholder="UUID người chơi cần loại" style="flex: 1;">
+          <button id="btnKick" class="btn-danger" onclick="hostKickPlayer()" disabled>Kick (cấm 10p)</button>
+        </div>
+      </div>
+
+      <div class="card-header" style="font-size: 0.9rem; margin-top: auto;">Host Event Log</div>
+      <div class="log-box" id="hostLog"></div>
+    </div>
+
+    <!-- CỘT 2: PLAYER INTERFACE -->
+    <div class="card">
+      <div class="card-header">
+        <div><span class="status-dot" id="playerDot"></span>Người Chơi (Player)</div>
+        <span id="playerStatusText" class="badge">CHƯA THAM GIA</span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div class="form-group">
+          <label>Mã PIN trận</label>
+          <input type="text" id="playerPin" placeholder="Mã PIN 6 số">
+        </div>
+        <div class="form-group">
+          <label>Biệt danh (Nickname)</label>
+          <input type="text" id="playerNickname" placeholder="Tên hiển thị (2-20 ký tự)" value="GamerOne">
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button id="btnPlayerJoin" class="btn-accent" onclick="playerJoin()">1. Tham gia phòng (POST /games/join)</button>
+        <button id="btnPlayerDisconnect" class="btn-secondary" onclick="playerDisconnect()" disabled>Rời phòng</button>
+      </div>
+
+      <div class="question-box" id="playerScreen">
+        <div style="text-align: center; padding: 20px; color: var(--text-muted);" id="playerWaitingText">
+          Chưa vào phòng. Hãy nhập PIN và Nickname rồi bấm tham gia.
+        </div>
+
+        <div id="playerActiveQuestion" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <span class="badge" id="qIndexBadge">Câu 1/3</span>
+            <span class="timer-badge" id="timerBadge">15s</span>
+          </div>
+          <div class="question-title" id="qContent">Nội dung câu hỏi ở đây?</div>
+          <div class="options-grid" id="optionsContainer"></div>
+          <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+            <button id="btnSubmitAnswer" class="btn-accent" onclick="submitPlayerAnswer()" disabled>Nộp Đáp Án</button>
+          </div>
+        </div>
+
+        <div id="playerAckBox" style="display: none; padding: 10px; margin-top: 8px; border-radius: 6px; background: #064e3b; color: #a7f3d0; font-size: 0.85rem;">
+          Đã nhận bài! (Chờ hết thời gian để xem kết quả)
+        </div>
+      </div>
+
+      <div class="card-header" style="font-size: 0.9rem; margin-top: auto;">Player Event Log</div>
+      <div class="log-box" id="playerLog"></div>
+    </div>
+  </div>
+
+  <script>
+    // Host State
+    let hostWs = null;
+    let currentHostQIndex = 0;
+
+    // Player State
+    let playerWs = null;
+    let playerToken = null;
+    let playerGameId = null;
+    let selectedOptionIds = [];
+    let currentQuestionData = null;
+    let timerInterval = null;
+
+    function logHost(msg) {
+      const box = document.getElementById("hostLog");
+      const time = new Date().toLocaleTimeString();
+      box.textContent = `[${time}] ${msg}\n` + box.textContent;
+    }
+
+    function logPlayer(msg) {
+      const box = document.getElementById("playerLog");
+      const time = new Date().toLocaleTimeString();
+      box.textContent = `[${time}] ${msg}\n` + box.textContent;
+    }
+
+    // -------------------------------------------------------------
+    // HOST ACTIONS
+    // -------------------------------------------------------------
+    async function hostConnect() {
+      const gameId = document.getElementById("hostGameId").value.trim();
+      const token = document.getElementById("hostToken").value.trim();
+      if (!gameId) { alert("Vui lòng nhập Game ID"); return; }
+      if (!token) { alert("Vui lòng nhập Host Token"); return; }
+
+      logHost(`Xin WS Ticket cho Game ID ${gameId}...`);
+      try {
+        const ticketRes = await fetch("/api/v1/realtime/ws-ticket", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ game_id: gameId })
+        });
+
+        if (!ticketRes.ok) {
+          const err = await ticketRes.json();
+          logHost(`Lỗi xin ticket: ${JSON.stringify(err)}`);
+          return;
+        }
+
+        const ticketData = await ticketRes.json();
+        const ticket = ticketData.ticket;
+        logHost(`Đã nhận vé (TTL 30s): ${ticket.substring(0, 10)}... Đang mở WebSocket`);
+
+        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/game?ticket=${ticket}`;
+        hostWs = new WebSocket(wsUrl);
+
+        hostWs.onopen = () => {
+          logHost("Host WebSocket đã kết nối thành công!");
+          document.getElementById("hostDot").className = "status-dot online";
+          document.getElementById("hostStatusText").textContent = "ONLINE (HOST)";
+          document.getElementById("btnHostConnect").disabled = true;
+          document.getElementById("btnHostDisconnect").disabled = false;
+          document.getElementById("btnGameStart").disabled = false;
+          document.getElementById("btnGameNext").disabled = false;
+          document.getElementById("btnGameEnd").disabled = false;
+          document.getElementById("btnKick").disabled = false;
+        };
+
+        hostWs.onmessage = (event) => {
+          logHost(`Nhận: ${event.data}`);
+          try {
+            const env = JSON.parse(event.data);
+            if (env.type === "question.start") {
+              currentHostQIndex = env.data.q_index;
+            }
+          } catch (e) {}
+        };
+
+        hostWs.onclose = (event) => {
+          logHost(`Host WebSocket đóng: Code ${event.code} (${event.reason || "No reason"})`);
+          document.getElementById("hostDot").className = "status-dot";
+          document.getElementById("hostStatusText").textContent = "DISCONNECTED";
+          document.getElementById("btnHostConnect").disabled = false;
+          document.getElementById("btnHostDisconnect").disabled = true;
+          document.getElementById("btnGameStart").disabled = true;
+          document.getElementById("btnGameNext").disabled = true;
+          document.getElementById("btnGameEnd").disabled = true;
+          document.getElementById("btnKick").disabled = true;
+        };
+
+        hostWs.onerror = (err) => {
+          logHost(`Host WebSocket lỗi kết nối.`);
+        };
+      } catch (err) {
+        logHost(`Lỗi kết nối Host: ${err.message}`);
+      }
+    }
+
+    function hostDisconnect() {
+      if (hostWs) hostWs.close();
+    }
+
+    function hostGameStart() {
+      if (!hostWs || hostWs.readyState !== WebSocket.OPEN) return;
+      const env = { type: "game.start", v: 1, data: {} };
+      hostWs.send(JSON.stringify(env));
+      logHost("Gửi lệnh game.start");
+    }
+
+    function hostGameNext() {
+      if (!hostWs || hostWs.readyState !== WebSocket.OPEN) return;
+      const env = {
+        type: "game.next",
+        v: 1,
+        data: { expected_q_index: currentHostQIndex + 1 }
+      };
+      hostWs.send(JSON.stringify(env));
+      logHost(`Gửi lệnh game.next (expected_q_index: ${currentHostQIndex + 1})`);
+    }
+
+    function hostGameEnd() {
+      if (!hostWs || hostWs.readyState !== WebSocket.OPEN) return;
+      const env = { type: "game.end", v: 1, data: {} };
+      hostWs.send(JSON.stringify(env));
+      logHost("Gửi lệnh game.end");
+    }
+
+    function hostKickPlayer() {
+      const pid = document.getElementById("kickPlayerId").value.trim();
+      if (!pid) { alert("Nhập UUID người chơi cần kick"); return; }
+      if (!hostWs || hostWs.readyState !== WebSocket.OPEN) return;
+      const env = { type: "player.kick", v: 1, data: { player_id: pid } };
+      hostWs.send(JSON.stringify(env));
+      logHost(`Gửi lệnh player.kick cho ${pid}`);
+    }
+
+    // -------------------------------------------------------------
+    // PLAYER ACTIONS
+    // -------------------------------------------------------------
+    async function playerJoin() {
+      const pin = document.getElementById("playerPin").value.trim();
+      const nickname = document.getElementById("playerNickname").value.trim();
+      if (!pin || !nickname) { alert("Vui lòng nhập PIN và Nickname"); return; }
+
+      logPlayer(`Gửi yêu cầu tham gia phòng PIN ${pin} với tên '${nickname}'...`);
+      try {
+        const joinRes = await fetch("/api/v1/games/join", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin: pin, nickname: nickname })
+        });
+
+        if (!joinRes.ok) {
+          const err = await joinRes.json();
+          logPlayer(`Lỗi tham gia: ${JSON.stringify(err)}`);
+          return;
+        }
+
+        const joinData = await joinRes.json();
+        playerToken = joinData.token;
+        playerGameId = joinData.game_id;
+        logPlayer(`Tham gia thành công! Token: ${playerToken.substring(0, 10)}...`);
+
+        // Lấy ws ticket
+        const ticketRes = await fetch("/api/v1/realtime/ws-ticket", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${playerToken}`
+          },
+          body: JSON.stringify({ game_id: playerGameId })
+        });
+
+        if (!ticketRes.ok) {
+          const err = await ticketRes.json();
+          logPlayer(`Lỗi lấy ticket: ${JSON.stringify(err)}`);
+          return;
+        }
+
+        const ticketData = await ticketRes.json();
+        const ticket = ticketData.ticket;
+        logPlayer(`Nhận vé WS ticket: ${ticket.substring(0, 10)}... Mở WebSocket...`);
+
+        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/game?ticket=${ticket}`;
+        playerWs = new WebSocket(wsUrl);
+
+        playerWs.onopen = () => {
+          logPlayer("Player WebSocket đã kết nối!");
+          document.getElementById("playerDot").className = "status-dot online";
+          document.getElementById("playerStatusText").textContent = "ONLINE (PLAYER)";
+          document.getElementById("btnPlayerJoin").disabled = true;
+          document.getElementById("btnPlayerDisconnect").disabled = false;
+          document.getElementById("playerWaitingText").textContent = "Đang ở phòng chờ. Chờ Host bấm bắt đầu...";
+        };
+
+        playerWs.onmessage = (event) => {
+          logPlayer(`Nhận: ${event.data}`);
+          try {
+            const env = JSON.parse(event.data);
+            handlePlayerMessage(env);
+          } catch (e) {}
+        };
+
+        playerWs.onclose = (event) => {
+          logPlayer(`Player WebSocket đóng: Code ${event.code} (${event.reason || "No reason"})`);
+          document.getElementById("playerDot").className = "status-dot";
+          document.getElementById("playerStatusText").textContent = "DISCONNECTED";
+          document.getElementById("btnPlayerJoin").disabled = false;
+          document.getElementById("btnPlayerDisconnect").disabled = true;
+          resetPlayerScreen();
+        };
+      } catch (err) {
+        logPlayer(`Lỗi kết nối Player: ${err.message}`);
+      }
+    }
+
+    function playerDisconnect() {
+      if (playerWs) playerWs.close();
+    }
+
+    function resetPlayerScreen() {
+      document.getElementById("playerWaitingText").style.display = "block";
+      document.getElementById("playerWaitingText").textContent = "Đã rời phòng.";
+      document.getElementById("playerActiveQuestion").style.display = "none";
+      document.getElementById("playerAckBox").style.display = "none";
+      if (timerInterval) clearInterval(timerInterval);
+    }
+
+    function handlePlayerMessage(env) {
+      if (env.type === "question.start") {
+        renderQuestion(env.data);
+      } else if (env.type === "snapshot") {
+        if (env.data.current_question) {
+          renderQuestion(env.data.current_question);
+        } else {
+          document.getElementById("playerWaitingText").textContent =
+            `Phòng chờ (${env.data.status}). Điểm hiện tại: ${env.data.player_score}`;
+        }
+      } else if (env.type === "answer.ack") {
+        const ack = env.data;
+        const box = document.getElementById("playerAckBox");
+        box.style.display = "block";
+        if (ack.accepted) {
+          box.style.background = "#064e3b";
+          box.style.color = "#a7f3d0";
+          box.textContent = "Đã nộp bài thành công! (Accepted: true)";
+        } else {
+          box.style.background = "#7f1d1d";
+          box.style.color = "#fecaca";
+          box.textContent = `Bài bị từ chối: ${ack.reason || "REJECTED"}`;
+        }
+        document.getElementById("btnSubmitAnswer").disabled = true;
+      }
+    }
+
+    function renderQuestion(qData) {
+      currentQuestionData = qData;
+      selectedOptionIds = [];
+      document.getElementById("playerWaitingText").style.display = "none";
+      document.getElementById("playerActiveQuestion").style.display = "block";
+      document.getElementById("playerAckBox").style.display = "none";
+      document.getElementById("btnSubmitAnswer").disabled = true;
+
+      document.getElementById("qIndexBadge").textContent = `Câu ${qData.q_index}/${qData.total_questions}`;
+      document.getElementById("qContent").textContent = qData.content;
+
+      const optsContainer = document.getElementById("optionsContainer");
+      optsContainer.innerHTML = "";
+
+      // options TUYỆT ĐỐI không chứa is_correct
+      qData.options.forEach((opt, idx) => {
+        const btn = document.createElement("button");
+        btn.className = "option-btn";
+        btn.textContent = `${String.fromCharCode(65 + idx)}. ${opt.content}`;
+        btn.onclick = () => selectOption(opt.id, btn);
+        optsContainer.appendChild(btn);
+      });
+
+      // Countdown
+      if (timerInterval) clearInterval(timerInterval);
+      const deadline = qData.deadline;
+      timerInterval = setInterval(() => {
+        const remainingMs = deadline - Date.now();
+        const remSec = Math.max(0, Math.ceil(remainingMs / 1000));
+        document.getElementById("timerBadge").textContent = `${remSec}s`;
+        if (remainingMs <= 0) {
+          clearInterval(timerInterval);
+          document.getElementById("btnSubmitAnswer").disabled = true;
+        }
+      }, 200);
+    }
+
+    function selectOption(optId, btnElement) {
+      selectedOptionIds = [optId];
+      const buttons = document.querySelectorAll(".option-btn");
+      buttons.forEach(b => b.classList.remove("selected"));
+      btnElement.classList.add("selected");
+      document.getElementById("btnSubmitAnswer").disabled = false;
+    }
+
+    function submitPlayerAnswer() {
+      if (!playerWs || playerWs.readyState !== WebSocket.OPEN) return;
+      if (!currentQuestionData || selectedOptionIds.length === 0) return;
+
+      const env = {
+        type: "answer.submit",
+        v: 1,
+        data: {
+          q_index: currentQuestionData.q_index,
+          question_id: currentQuestionData.question_id,
+          selected_option_ids: selectedOptionIds
+        }
+      };
+      playerWs.send(JSON.stringify(env));
+      logPlayer(`Nộp đáp án cho câu ${currentQuestionData.q_index}: ${JSON.stringify(selectedOptionIds)}`);
+      document.getElementById("btnSubmitAnswer").disabled = true;
+    }
+  </script>
+</body>
+</html>
