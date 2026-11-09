@@ -408,10 +408,10 @@ async def test_logout_dua_jti_vao_denylist_va_access_token_cu_bi_tu_choi(client)
     assert me_after.status_code == 401
     assert me_after.json()["error"]["code"] == "TOKEN_REVOKED"
 
-    # Refresh token cũ cũng bị thu hồi
+    # Refresh token cũ cũng bị thu hồi (gửi lại token đã thu hồi kích hoạt reuse detection - AU-5)
     ref_after = await post_refresh(client, ref)
     assert ref_after.status_code == 401
-    assert ref_after.json()["error"]["code"] == "REFRESH_TOKEN_INVALID"
+    assert ref_after.json()["error"]["code"] == "REFRESH_TOKEN_REUSED"
 
 
 # ------------------------------------------------------------------ AU-7: logout-all & đổi mật khẩu
