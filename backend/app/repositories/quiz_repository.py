@@ -71,6 +71,7 @@ async def create(session: AsyncSession, quiz: Quiz) -> Quiz:
 async def update(session: AsyncSession, quiz: Quiz) -> Quiz:
     """Cập nhật thông tin Quiz."""
     await session.flush()
+    await session.refresh(quiz, ["updated_at", "version", "status"])
     return quiz
 
 

@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
+from app.api.v1 import realtime
 from app.api.v1.realtime import redeem_ws_ticket
 from app.core.app_factory import create_app
 from app.core.redis import create_redis
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = create_app("QuizArena Realtime", lifespan=lifespan)
+app.include_router(realtime.router, prefix="/api/v1")
 
 
 @app.get("/healthz")

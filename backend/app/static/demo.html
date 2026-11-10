@@ -25,7 +25,7 @@
       background-color: var(--bg-dark);
       color: var(--text-main);
       padding: 16px;
-      height: 100vh;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
     }
@@ -54,6 +54,25 @@
       border-radius: 9999px;
       background-color: #312e81;
       color: #c7d2fe;
+    }
+
+    .quick-setup-card {
+      background: linear-gradient(135deg, #1e1b4b 0%, #1e293b 100%);
+      border: 1px solid #6366f1;
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .quick-setup-header {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #a5b4fc;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
 
     .container {
@@ -200,6 +219,34 @@
     </div>
   </header>
 
+  <!-- 1-CLICK TEST SETUP BAR -->
+  <div class="quick-setup-card">
+    <div class="quick-setup-header">
+      <span>🚀 1-Click Setup: Đăng Nhập & Tạo Trận Test Nhanh</span>
+      <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">Tự động đăng nhập, tạo Quiz mẫu, xuất bản và mở phòng đấu</span>
+    </div>
+    <div style="display: grid; grid-template-columns: 1.2fr 1.5fr 1fr auto; gap: 10px; align-items: end;">
+      <div class="form-group">
+        <label>API Base URL (bỏ trống = tự nhận)</label>
+        <input type="text" id="apiBaseUrl" placeholder="http://localhost:8000 hoặc /">
+      </div>
+      <div class="form-group">
+        <label>Email Admin</label>
+        <input type="text" id="quickEmail" value="nphihung961@gmail.com">
+      </div>
+      <div class="form-group">
+        <label>Mật khẩu</label>
+        <input type="password" id="quickPassword" value="hung8521">
+      </div>
+      <div>
+        <button id="btnQuickSetup" class="btn-accent" style="height: 38px; white-space: nowrap; font-size: 0.9rem;" onclick="quickSetupGame()">
+          ⚡ Tự Động Tạo Trận Test
+        </button>
+      </div>
+    </div>
+    <div id="quickSetupStatus" style="font-size: 0.85rem; margin-top: 8px; display: none; line-height: 1.4;"></div>
+  </div>
+
   <div class="container">
     <!-- CỘT 1: HOST CONTROLLER -->
     <div class="card">
@@ -312,6 +359,36 @@
     let currentQuestionData = null;
     let timerInterval = null;
 
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    function getApiBase() {
+      const manual = document.getElementById("apiBaseUrl") ? document.getElementById("apiBaseUrl").value.trim() : "";
+      if (manual) return manual.replace(/\/+$/, "");
+      // Nginx chạy ở cổng 80 (http://localhost). Nếu trang demo đang mở từ cổng khác (8001, 8000, hoặc file://),
+      // luôn ưu tiên gọi qua Nginx http://localhost để vào Docker container có kết nối cơ sở dữ liệu!
+      if (window.location.port === "8001" || window.location.port === "8000" || window.location.protocol === "file:") {
+        return "http://localhost";
+      }
+      return window.location.origin;
+    }
+
+    function getWsUrl(ticket) {
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      // Nginx đón WebSocket ở cổng 80 (/ws/game). Bất kể trang mở từ cổng nào (8001, 8000, hay file://),
+      // luôn kết nối qua cổng chuẩn Nginx (cổng 80) để vào đúng Realtime service trong Docker:
+      if (window.location.port !== "" && window.location.port !== "80") {
+        return `${wsProtocol}//${window.location.hostname}/ws/game?ticket=${ticket}`;
+      }
+      return `${wsProtocol}//${window.location.host}/ws/game?ticket=${ticket}`;
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      const apiInput = document.getElementById("apiBaseUrl");
+      if (apiInput && (window.location.port === "8001" || window.location.port === "8000" || window.location.protocol === "file:")) {
+        apiInput.value = "http://localhost";
+      }
+    });
+
     function logHost(msg) {
       const box = document.getElementById("hostLog");
       const time = new Date().toLocaleTimeString();
@@ -325,17 +402,177 @@
     }
 
     // -------------------------------------------------------------
+    // 1-CLICK QUICK SETUP
+    // -------------------------------------------------------------
+    async function quickSetupGame() {
+      const statusEl = document.getElementById("quickSetupStatus");
+      const btn = document.getElementById("btnQuickSetup");
+      statusEl.style.display = "block";
+      statusEl.style.color = "#fbbf24";
+      statusEl.textContent = "⏳ Đang đăng nhập tài khoản quản trị...";
+      btn.disabled = true;
+
+      const apiBase = getApiBase();
+      const email = document.getElementById("quickEmail").value.trim();
+      const password = document.getElementById("quickPassword").value.trim();
+
+      try {
+        // 1. Đăng nhập
+        const loginRes = await fetch(`${apiBase}/api/v1/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password })
+        });
+        if (!loginRes.ok) {
+          const err = await loginRes.json();
+          throw new Error(`Đăng nhập thất bại: ${JSON.stringify(err)}`);
+        }
+        const loginData = await loginRes.json();
+        const token = loginData.access_token;
+        document.getElementById("hostToken").value = token;
+        logHost("Đã lấy thành công Host Access Token!");
+
+        // 2. Tạo Quiz mới
+        statusEl.textContent = "⏳ Đang tạo bộ đề Quiz mới với 3 câu hỏi...";
+        const quizRes = await fetch(`${apiBase}/api/v1/quizzes`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            title: "Bộ câu hỏi Demo Trực Quan (3 câu)",
+            description: "Tạo tự động cho phiên kiểm thử WebSocket",
+            visibility: "public"
+          })
+        });
+        if (!quizRes.ok) {
+          const err = await quizRes.json();
+          throw new Error(`Tạo quiz thất bại: ${JSON.stringify(err)}`);
+        }
+        const quiz = await quizRes.json();
+        const quizId = quiz.id;
+
+        // Thêm 3 câu hỏi
+        const sampleQuestions = [
+          {
+            type: "single",
+            content: "Thủ đô của nước Cộng hòa Xã hội Chủ nghĩa Việt Nam là gì?",
+            time_limit_s: 15,
+            points: 1000,
+            options: [
+              { content: "Hà Nội", is_correct: true },
+              { content: "TP. Hồ Chí Minh", is_correct: false },
+              { content: "Đà Nẵng", is_correct: false },
+              { content: "Hải Phòng", is_correct: false }
+            ]
+          },
+          {
+            type: "single",
+            content: "Framework backend chính của hệ thống QuizArena là gì?",
+            time_limit_s: 15,
+            points: 1000,
+            options: [
+              { content: "FastAPI", is_correct: true },
+              { content: "Django", is_correct: false },
+              { content: "Express.js", is_correct: false },
+              { content: "Spring Boot", is_correct: false }
+            ]
+          },
+          {
+            type: "single",
+            content: "Giao thức truyền thông hai chiều thời gian thực trong live engine là gì?",
+            time_limit_s: 15,
+            points: 1000,
+            options: [
+              { content: "WebSocket", is_correct: true },
+              { content: "FTP", is_correct: false },
+              { content: "SMTP", is_correct: false },
+              { content: "Telnet", is_correct: false }
+            ]
+          }
+        ];
+
+        for (const q of sampleQuestions) {
+          await fetch(`${apiBase}/api/v1/quizzes/${quizId}/questions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify(q)
+          });
+        }
+
+        // Xuất bản quiz
+        statusEl.textContent = "⏳ Đang xuất bản Quiz...";
+        const pubRes = await fetch(`${apiBase}/api/v1/quizzes/${quizId}/publish`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          }
+        });
+        if (!pubRes.ok) {
+          const err = await pubRes.json();
+          throw new Error(`Xuất bản quiz thất bại: ${JSON.stringify(err)}`);
+        }
+
+        // 3. Tạo phòng đấu (Game Session)
+        statusEl.textContent = "⏳ Đang mở phòng đấu live...";
+        const gameRes = await fetch(`${apiBase}/api/v1/games`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ quiz_id: quizId })
+        });
+        if (!gameRes.ok) {
+          const err = await gameRes.json();
+          throw new Error(`Mở phòng đấu thất bại: ${JSON.stringify(err)}`);
+        }
+        const gameData = await gameRes.json();
+
+        // Nạp vào cả 2 cột
+        document.getElementById("hostGameId").value = gameData.game_id;
+        document.getElementById("hostPin").value = gameData.pin;
+        document.getElementById("playerPin").value = gameData.pin;
+
+        statusEl.style.color = "#34d399";
+        statusEl.innerHTML = `✅ <b>ĐÃ MỞ PHÒNG ĐẤU THÀNH CÔNG!</b> Mã PIN: <b style="font-size:1.15rem; color:#facc15;">${gameData.pin}</b><br>` +
+          `👉 <b>Bước 1:</b> Bấm <b>[1. Đổi Ticket & Kết Nối Host WS]</b> ở cột trái.<br>` +
+          `👉 <b>Bước 2:</b> Bấm <b>[1. Tham gia phòng]</b> ở cột phải.<br>` +
+          `👉 <b>Bước 3:</b> Cột trái bấm <b>[Bắt đầu (game.start)]</b> để bắt đầu chơi thử!`;
+
+        logHost(`Phòng đấu đã sẵn sàng! Game ID: ${gameData.game_id}, PIN: ${gameData.pin}`);
+        logPlayer(`Mã PIN ${gameData.pin} đã được điền sẵn! Hãy bấm [1. Tham gia phòng].`);
+      } catch (err) {
+        statusEl.style.color = "#f87171";
+        statusEl.textContent = `❌ Lỗi: ${err.message}`;
+        logHost(`Lỗi thiết lập: ${err.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // -------------------------------------------------------------
     // HOST ACTIONS
     // -------------------------------------------------------------
     async function hostConnect() {
       const gameId = document.getElementById("hostGameId").value.trim();
       const token = document.getElementById("hostToken").value.trim();
       if (!gameId) { alert("Vui lòng nhập Game ID"); return; }
-      if (!token) { alert("Vui lòng nhập Host Token"); return; }
+      if (!UUID_REGEX.test(gameId)) {
+        alert(`Game ID '${gameId}' không phải UUID hợp lệ!\n\nVí dụ đúng: b886a147-380b-4876-96ef-c88c95a6f272\n\n💡 Mẹo: Hãy bấm nút [⚡ Tự Động Tạo Trận Test] ở trên để hệ thống tự tạo Game ID và PIN mẫu!`);
+        return;
+      }
+      if (!token) { alert("Vui lòng nhập Host Token (hoặc bấm nút 'Tự Động Tạo Trận Test' ở trên)"); return; }
 
-      logHost(`Xin WS Ticket cho Game ID ${gameId}...`);
+      const apiBase = getApiBase();
+      logHost(`Xin WS Ticket cho Game ID ${gameId} từ ${apiBase}...`);
       try {
-        const ticketRes = await fetch("/api/v1/realtime/ws-ticket", {
+        const ticketRes = await fetch(`${apiBase}/api/v1/realtime/ws-ticket`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -354,8 +591,8 @@
         const ticket = ticketData.ticket;
         logHost(`Đã nhận vé (TTL 30s): ${ticket.substring(0, 10)}... Đang mở WebSocket`);
 
-        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws/game?ticket=${ticket}`;
+        const wsUrl = getWsUrl(ticket);
+        logHost(`Đang kết nối: ${wsUrl}`);
         hostWs = new WebSocket(wsUrl);
 
         hostWs.onopen = () => {
@@ -446,9 +683,10 @@
       const nickname = document.getElementById("playerNickname").value.trim();
       if (!pin || !nickname) { alert("Vui lòng nhập PIN và Nickname"); return; }
 
-      logPlayer(`Gửi yêu cầu tham gia phòng PIN ${pin} với tên '${nickname}'...`);
+      const apiBase = getApiBase();
+      logPlayer(`Gửi yêu cầu tham gia phòng PIN ${pin} với tên '${nickname}' tới ${apiBase}...`);
       try {
-        const joinRes = await fetch("/api/v1/games/join", {
+        const joinRes = await fetch(`${apiBase}/api/v1/games/join`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ pin: pin, nickname: nickname })
@@ -466,7 +704,7 @@
         logPlayer(`Tham gia thành công! Token: ${playerToken.substring(0, 10)}...`);
 
         // Lấy ws ticket
-        const ticketRes = await fetch("/api/v1/realtime/ws-ticket", {
+        const ticketRes = await fetch(`${apiBase}/api/v1/realtime/ws-ticket`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -485,8 +723,8 @@
         const ticket = ticketData.ticket;
         logPlayer(`Nhận vé WS ticket: ${ticket.substring(0, 10)}... Mở WebSocket...`);
 
-        const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws/game?ticket=${ticket}`;
+        const wsUrl = getWsUrl(ticket);
+        logPlayer(`Đang kết nối: ${wsUrl}`);
         playerWs = new WebSocket(wsUrl);
 
         playerWs.onopen = () => {
