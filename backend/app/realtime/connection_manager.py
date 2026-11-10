@@ -173,6 +173,11 @@ class ConnectionManager:
                         await self._kick_local_player(game_id, target_pid)
                     continue
 
+                # Cá nhân hóa thông điệp question.result và game.finished cho từng kết nối
+                if msg_type in ("question.result", "game.finished"):
+                    await self.broadcast_personalized(game_id, parsed)
+                    continue
+
                 # Fan-out cho toàn bộ client cục bộ của game
                 await self.broadcast_local(game_id, raw_data)
 
@@ -226,6 +231,90 @@ class ConnectionManager:
 
         # Chạy đồng thời cho toàn bộ kết nối cục bộ
         await asyncio.gather(*(_safe_send(c) for c in conns), return_exceptions=True)
+
+    async def broadcast_personalized(self, game_id: str, envelope: dict[str, Any]) -> None:
+        """Phát thông điệp cá nhân hóa (question.result, game.finished) cho từng kết nối.
+
+        Mỗi replica tự pipeline ZSCORE/ZREVRANK/HGET cho các kết nối của mình (FR-GAME-16).
+        """
+        async with self._lock:
+            conns = list(self.active_connections.get(game_id, {}).values())
+
+        if not conns:
+            return
+
+        msg_type = envelope.get("type")
+        base_data = envelope.get("data", {})
+        seq = envelope.get("seq")
+        v = envelope.get("v", 1)
+
+        players = [c for c in conns if not c.is_host]
+        hosts = [c for c in conns if c.is_host]
+
+        async def _safe_send_to(conn: ClientConnection, text: str) -> None:
+            try:
+                await asyncio.wait_for(conn.ws.send_text(text), timeout=1.5)
+            except TimeoutError:
+                log.warning("Timeout 1.5s khi gửi cho client %s (game %s)", conn.client_id, game_id)
+            except WebSocketDisconnect:
+                pass
+            except Exception as exc:  # noqa: BLE001
+                log.debug("Lỗi khi gửi thông điệp cho client %s: %s", conn.client_id, exc)
+
+        tasks: list[asyncio.Task[None]] = []
+
+        # 1. Cá nhân hóa cho người chơi trong question.result
+        if players and msg_type == "question.result":
+            q_index = base_data.get("q_index", 0)
+            pipe = self.redis.pipeline()
+            for p in players:
+                pipe.hget(f"game:{game_id}:q:{q_index}:pts", p.client_id)
+                pipe.zscore(f"game:{game_id}:lb", p.client_id)
+                pipe.zrevrank(f"game:{game_id}:lb", p.client_id)
+                pipe.hget(f"game:{game_id}:streaks", p.client_id)
+            pipe_results = await pipe.execute()
+
+            for idx, p in enumerate(players):
+                pts = pipe_results[idx * 4]
+                score = pipe_results[idx * 4 + 1]
+                rank = pipe_results[idx * 4 + 2]
+                streak = pipe_results[idx * 4 + 3]
+
+                p_data = dict(base_data)
+                p_data["player_points_awarded"] = int(pts) if pts is not None else 0
+                p_data["player_total_score"] = int(score) if score is not None else 0
+                p_data["player_rank"] = (rank + 1) if rank is not None else None
+                p_data["player_streak"] = int(streak) if streak is not None else 0
+
+                p_env = {"type": msg_type, "v": v, "seq": seq, "data": p_data}
+                tasks.append(asyncio.create_task(_safe_send_to(p, json.dumps(p_env))))
+
+        # 2. Cá nhân hóa cho người chơi trong game.finished
+        elif players and msg_type == "game.finished":
+            pipe = self.redis.pipeline()
+            for p in players:
+                pipe.zscore(f"game:{game_id}:lb", p.client_id)
+                pipe.zrevrank(f"game:{game_id}:lb", p.client_id)
+            pipe_results = await pipe.execute()
+
+            for idx, p in enumerate(players):
+                score = pipe_results[idx * 2]
+                rank = pipe_results[idx * 2 + 1]
+
+                p_data = dict(base_data)
+                p_data["final_score"] = int(score) if score is not None else 0
+                p_data["final_rank"] = (rank + 1) if rank is not None else None
+
+                p_env = {"type": msg_type, "v": v, "seq": seq, "data": p_data}
+                tasks.append(asyncio.create_task(_safe_send_to(p, json.dumps(p_env))))
+
+        # 3. Host nhận bản tin gốc (không chứa trường cá nhân hóa player_*)
+        raw_base = json.dumps(envelope)
+        for h in hosts:
+            tasks.append(asyncio.create_task(_safe_send_to(h, raw_base)))
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def broadcast_game(self, game_id: str, envelope: dict[str, Any]) -> None:
         """Gán seq tự tăng và phát thông điệp lên kênh Redis Pub/Sub của game."""

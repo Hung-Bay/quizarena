@@ -17,7 +17,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-from app.game import lua_engine
+from app.game import clock, lua_engine
 from app.game.enums import WSMessageType
 from app.game.schemas import (
     AnswerAckData,
@@ -175,6 +175,14 @@ class MessageHandler:
         await self.manager.broadcast_game(game_id, broadcast_envelope)
         log.info("Host bắt đầu trận đấu %s, phát câu hỏi 1", game_id)
 
+        # 5. Lập lịch Game Clock tự động đóng câu khi hết giờ (FR-GAME-15, ADR-003)
+        await clock.schedule_question_deadline_timer(
+            self.redis,
+            game_id=game_id,
+            q_index=1,
+            deadline_ms=res.deadline,
+        )
+
     async def _handle_game_next(self, conn: ClientConnection, data: dict[str, Any]) -> None:
         """Host chuyển sang câu hỏi tiếp theo (FR-GAME-14)."""
         if not conn.is_host:
@@ -238,6 +246,14 @@ class MessageHandler:
         await self.manager.broadcast_game(game_id, broadcast_envelope)
         log.info("Game %s chuyển sang câu hỏi %d", game_id, next_q)
 
+        # 5. Lập lịch Game Clock tự động đóng câu khi hết giờ (FR-GAME-15, ADR-003)
+        await clock.schedule_question_deadline_timer(
+            self.redis,
+            game_id=game_id,
+            q_index=next_q,
+            deadline_ms=res.deadline,
+        )
+
     async def _handle_game_end(self, conn: ClientConnection, data: dict[str, Any]) -> None:
         """Host kết thúc trận đấu sớm (FR-GAME-14)."""
         if not conn.is_host:
@@ -248,22 +264,44 @@ class MessageHandler:
 
         game_id = conn.game_id
         res = await lua_engine.execute_transition(self.redis, game_id=game_id, action="end")
-        if not res.ok:
+        if not res.ok and res.status != "finished":
             await self._send_error(
                 conn, code=res.error or "INVALID_STATE", message="Không thể kết thúc trận đấu"
             )
             return
+
+        # Lấy top 3 Podium và tổng số người chơi
+        top_players = await self.redis.zrevrange(  # type: ignore[misc]
+            f"game:{game_id}:lb", 0, 2, withscores=True
+        )
+        podium: list[dict[str, Any]] = []
+        for idx, (pid_str, score_val) in enumerate(top_players, start=1):
+            nick = (
+                await self.redis.hget(f"game:{game_id}:nicknames", pid_str)  # type: ignore[misc]
+                or "Người chơi"
+            )
+            podium.append(
+                {
+                    "rank": idx,
+                    "player_id": pid_str,
+                    "nickname": nick,
+                    "score": int(score_val),
+                    "streak": 0,
+                }
+            )
+        total_p = await self.redis.zcard(f"game:{game_id}:lb")  # type: ignore[misc]
 
         broadcast_envelope = {
             "type": WSMessageType.GAME_FINISHED.value,
             "v": 1,
             "data": {
                 "game_id": game_id,
-                "message": "Trận đấu đã kết thúc bởi Host",
+                "podium": podium,
+                "total_players": total_p,
             },
         }
         await self.manager.broadcast_game(game_id, broadcast_envelope)
-        log.info("Host đã kết thúc trận đấu %s", game_id)
+        log.info("Host đã kết thúc trận đấu %s, phát game.finished", game_id)
 
     async def _handle_player_kick(self, conn: ClientConnection, data: dict[str, Any]) -> None:
         """Host loại một người chơi khỏi trận đấu (FR-GAME-05)."""
@@ -374,6 +412,19 @@ class MessageHandler:
             data=ack_data.model_dump(mode="json"),
         )
         await self.manager.send_personal(conn.ws, ack_envelope.model_dump(mode="json"))
+
+        # Nếu tất cả người chơi trong phòng đã nộp bài (all_answered) -> đóng câu hỏi sớm ngay lập tức!
+        if res.all_answered:
+            log.info(
+                "Tất cả người chơi đã nộp bài câu %d trận %s -> kích hoạt đóng sớm (FR-GAME-15)",
+                q_index,
+                game_id,
+            )
+            await clock.close_and_broadcast_question(
+                self.redis,
+                game_id=game_id,
+                q_index=q_index,
+            )
 
     async def _build_question_start_payload(
         self,
