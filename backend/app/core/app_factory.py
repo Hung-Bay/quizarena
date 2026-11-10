@@ -2,6 +2,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.errors import register_error_handlers
@@ -19,7 +20,13 @@ def create_app(
 
     # add_middleware: cái thêm SAU CÙNG nằm NGOÀI CÙNG. Thứ tự mục tiêu (ngoài → trong):
     #   Sentry/GlitchTip → RequestID → Log → CORS → Metrics → Exception
-    # Phase 0 chỉ có RequestID + Log; CORS, Metrics, Sentry thêm ở phase sau.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"^https?://.*",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.add_middleware(AccessLogMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
