@@ -374,8 +374,10 @@
 
     function getWsUrl(ticket) {
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      if (window.location.port === "8000" || window.location.protocol === "file:") {
-        return `${wsProtocol}//localhost/ws/game?ticket=${ticket}`;
+      // Nginx đón WebSocket ở cổng 80 (/ws/game). Bất kể trang mở từ cổng nào (8001, 8000, hay file://),
+      // luôn kết nối qua cổng chuẩn Nginx (cổng 80) để vào đúng Realtime service trong Docker:
+      if (window.location.port !== "" && window.location.port !== "80") {
+        return `${wsProtocol}//${window.location.hostname}/ws/game?ticket=${ticket}`;
       }
       return `${wsProtocol}//${window.location.host}/ws/game?ticket=${ticket}`;
     }
