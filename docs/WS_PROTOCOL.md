@@ -1,128 +1,222 @@
 # WS_PROTOCOL — Giao thức WebSocket của QuizArena
 
-**Phiên bản giao thức:** `v = 1` · **Trạng thái tài liệu:** NHÁP (Phase 0). Chi tiết payload chốt ở Phase 3 · **Tham chiếu:** `docs/SRS.md` (FR-AUTH-11, FR-GAME-03…22), `docs/ARCHITECTURE.md`
+**Phiên bản giao thức:** `v = 1` · **Trạng thái tài liệu:** CHÍNH THỨC (Phase 3 hoàn thiện) · **Tham chiếu:** `docs/SRS.md` (FR-AUTH-11, FR-GAME-03..22), `docs/ARCHITECTURE.md`, `docs/ADR-003-game-clock.md`
 
 
 ## 1. Kết nối và xác thực
 
-Trình duyệt không gửi được header `Authorization` khi mở WebSocket, nên dùng vé dùng một lần (FR-AUTH-11):
+Trình duyệt không gửi được header `Authorization` khi mở kết nối WebSocket, vì vậy giao thức sử dụng vé dùng một lần (AU-11):
 
 ```
-1. Client  → POST /api/v1/realtime/ws-ticket   (kèm access token hoặc guest token)
-2. Server  ← { "ticket": "<chuỗi ngẫu nhiên>" }     vé lưu Redis, TTL 30 giây
-3. Client  → mở wss://<domain>/ws/game?ticket=<ticket>
-4. Server  đổi vé lấy danh tính bằng GETDEL (xóa ngay), rồi chấp nhận hoặc đóng kết nối
+1. Client  → POST /api/v1/realtime/ws-ticket   (kèm Access Token hoặc Guest Token)
+2. Server  ← { "ticket": "<chuỗi ngẫu nhiên>", "expires_in": 30 }  (lưu Redis, TTL 30 giây)
+3. Client  → Mở wss://<domain>/ws/game?ticket=<ticket>
+4. Server  Đổi vé lấy danh tính bằng lệnh nguyên tử GETDEL (xóa ngay lập tức), sau đó chấp nhận hoặc đóng kết nối
 ```
 
-- Vé dùng lần thứ hai hoặc quá 30 giây bị từ chối.
-- Vai trò của kết nối (host hay người chơi) lấy từ danh tính trong vé, **không** lấy từ nội dung thông điệp.
-- Quyền cần có để xin vé: `game:play` (người chơi) hoặc `game:host_own` (host của đúng trận).
+- Vé dùng lần thứ hai hoặc quá 30 giây bị từ chối ngay lập tức với mã đóng `4001` (`TICKET_INVALID`).
+- Quyền và vai trò của kết nối (Host hay Player) được xác định từ danh tính trong vé, **không** lấy từ nội dung thông điệp client gửi.
+- Quyền cần có để tạo vé: `game:play` (người chơi) hoặc `game:host_own` (host của đúng trận đó).
+- Ngay sau khi bắt tay thành công, Server gửi ngay một thông điệp `snapshot` chứa trạng thái hiện tại (FR-GAME-17).
 
-### Mã đóng kết nối **[ĐỀ XUẤT]**
+### Mã đóng kết nối chuẩn
 
 | Mã | Tên | Khi nào |
 |---|---|---|
-| 4001 | `TICKET_INVALID` | Vé không tồn tại, hết hạn hoặc đã dùng |
-| 4002 | `KICKED` | Người chơi bị host loại (FR-GAME-05) |
-| 4003 | `GAME_ENDED` | Trận đã kết thúc hoặc hết hạn |
-| 4004 | `PROTOCOL_ERROR` | Vi phạm giao thức nghiêm trọng hoặc lặp lại |
-| 1013 | (chuẩn) | Server tạm thời không nhận thêm, thử lại |
+| `4001` | `TICKET_INVALID` | Vé không tồn tại, hết hạn (> 30s) hoặc đã bị đổi trước đó |
+| `4002` | `KICKED` | Người chơi bị Host loại (FR-GAME-05, cấm tham gia lại trong 10 phút) |
+| `4003` | `GAME_ENDED` | Trận đấu không tồn tại, đã kết thúc (`finished`) hoặc hết hạn |
+| `4004` | `PROTOCOL_ERROR` | Vi phạm giao thức nghiêm trọng |
+| `1000` | `NORMAL_CLOSURE` | Đóng kết nối thông thường hoặc kết nối lại từ cùng thiết bị |
 
-## 2. Khung thông điệp (envelope)
 
-Mọi thông điệp, hai chiều, là một đối tượng JSON:
+## 2. Khung thông điệp (Envelope)
 
-```json
-{ "type": "answer.submit", "v": 1, "data": { }, "seq": 17 }
-```
-
-| Trường | Kiểu | Ý nghĩa |
-|---|---|---|
-| `type` | string | Tên thông điệp, nằm trong danh sách ở mục 3–4 |
-| `v` | integer | Phiên bản giao thức. Server từ chối `v` không hỗ trợ bằng `error` |
-| `data` | object | Nội dung riêng của từng `type` (chốt ở Phase 3) |
-| `seq` | integer | Số thứ tự **[ĐỀ XUẤT]**: ở chiều server→client, tăng dần theo từng trận để client phát hiện thiếu thông điệp và yêu cầu snapshot; ở chiều client→server, client tự tăng để server loại thông điệp lặp |
-
-Thông điệp có `type` ngoài danh sách, thiếu `v`, hoặc `data` sai cấu trúc → server trả `error`, **không đổi trạng thái trận** (FR-GAME-22).
-
-## 3. Server → Client
-
-| `type` | Gửi cho | Khi nào | Nội dung chính (nháp) | FR |
-|---|---|---|---|---|
-| `lobby.update` | Host, người chơi | Có người vào/ra/bị kick ở phòng chờ | Danh sách người chơi (nickname, trạng thái online) | FR-GAME-03 |
-| `question.start` | Mọi người | Bắt đầu một câu | `index`, nội dung câu, các lựa chọn, `time_limit`, `server_time`, `deadline` (epoch ms). **Không có đáp án đúng** | FR-GAME-06, 08 |
-| `answer.ack` | Người trả lời | Sau mỗi `answer.submit` | `accepted` (bool), `reason` khi từ chối (ví dụ `LATE`). Chỉ báo "đã ghi nhận", chưa nói đúng/sai | FR-GAME-07, 09 |
-| `question.result` | Mọi người; mỗi người chơi kèm phần riêng | Hết câu | Đáp án đúng, phân bố lựa chọn; riêng người chơi: điểm câu, tổng điểm, thứ hạng | FR-GAME-16 |
-| `leaderboard` | Mọi người | Sau kết quả câu | Top 10 (nickname, điểm) | FR-GAME-16 |
-| `game.finished` | Mọi người | Trận kết thúc | Bục vinh danh, kết quả cuối; báo cáo AI sẽ đến sau | FR-AIRPT-01 |
-| `error` | Người gửi lỗi | Thông điệp sai hoặc bị từ chối | `code`, `message` | FR-GAME-21, 22 |
-| `server.draining` | Mọi kết nối của replica đang tắt | Replica sắp dừng (scale down, deploy) | Thời gian còn lại dự kiến; client chuẩn bị kết nối lại | NF-5 |
-| `snapshot` **[ĐỀ XUẤT]** | Client vừa kết nối lại | Ngay sau khi kết nối thành công | Trạng thái hiện tại: câu đang chạy cùng thời gian còn lại, hoặc màn kết quả; điểm của người đó | FR-GAME-17 |
-
-## 4. Client → Server
-
-| `type` | Ai gửi | Mô tả | FR |
-|---|---|---|---|
-| `answer.submit` | Người chơi | Nộp đáp án cho câu hiện tại (mã câu, danh sách lựa chọn). Mỗi người mỗi câu một lần, gửi lại trả kết quả lần đầu | FR-GAME-07, 09, 13 |
-| `heartbeat` | Người chơi | Gửi mỗi 15 giây. Quá 45 giây không có thì bị đánh dấu offline (không xóa điểm) | FR-GAME-18 |
-| `game.start` | Host | Bắt đầu trận từ phòng chờ | FR-GAME-14 |
-| `game.next` | Host | Sang câu tiếp theo | FR-GAME-14 |
-| `game.pause` | Host | Tạm dừng trận (cách mô hình hóa còn chờ chốt, xem `ARCHITECTURE.md` mục 10) | FR-GAME-14 |
-| `game.end` | Host | Kết thúc trận sớm; ghi `audit_logs` | FR-GAME-14; FR-ADM-05 |
-| `player.kick` | Host | Loại một người chơi; người đó không vào lại trong 10 phút | FR-GAME-05 |
-
-Lệnh của host chỉ được chấp nhận từ kết nối có danh tính host của **đúng trận đó**; người chơi gửi lệnh host bị từ chối bằng `error` mã `FORBIDDEN`.
-
-## 5. Quy tắc chung
-
-1. **Đồng hồ do server quyết định.** Client chỉ dùng `server_time` và `deadline` để hiển thị đếm ngược, tự hiệu chỉnh độ lệch giờ. Đáp án đến sau `deadline + 500 ms` bị từ chối với `reason="LATE"` (FR-GAME-06, 07).
-2. **Không lộ đáp án.** Mọi thông điệp trước khi hết câu không chứa đáp án đúng, kể cả trường ẩn (FR-GAME-08).
-3. **Idempotent.** Nộp đáp án lặp lại không cộng điểm lần nữa (FR-GAME-09).
-4. **Giới hạn tốc độ.** Tối đa 5 thông điệp mỗi giây mỗi kết nối; phần vượt bị từ chối bằng `error` mã `RATE_LIMITED` (FR-GAME-21).
-5. **Kết nối lại.** Cùng danh tính kết nối lại sẽ nhận snapshot hiện tại và giữ nguyên điểm; host giữ quyền điều khiển (FR-GAME-17).
-6. **Chuyển kết nối khi tắt replica.** Replica gửi `server.draining`, client kết nối lại (xin vé mới) trong vòng 3 giây (NF-5).
-7. **Phiên bản.** Thay đổi không tương thích tăng `v`; server có thể hỗ trợ đồng thời nhiều `v` trong thời gian chuyển tiếp.
-
-## 6. Mã lỗi của thông điệp `error` **[ĐỀ XUẤT]**
-
-| `code` | Ý nghĩa |
-|---|---|
-| `BAD_MESSAGE` | Sai cấu trúc, thiếu `v`, `type` không hợp lệ |
-| `UNSUPPORTED_VERSION` | `v` không được hỗ trợ |
-| `FORBIDDEN` | Gửi lệnh không đúng quyền (ví dụ người chơi gửi `game.next`) |
-| `INVALID_STATE` | Lệnh không hợp lệ ở trạng thái hiện tại (ví dụ `game.next` khi đang ở phòng chờ) |
-| `RATE_LIMITED` | Vượt 5 thông điệp/giây |
-| `NOT_ACTIVE` | Nộp đáp án khi không có câu nào đang chạy |
-| `ALREADY_ANSWERED` | Đã trả lời câu này (kèm kết quả lần đầu) |
-
-Lý do từ chối trong `answer.ack` (`reason`): `LATE`, `NOT_ACTIVE`, `ALREADY_ANSWERED`.
-
-## 7. Ví dụ minh họa (nháp, cấu trúc `data` chưa chốt)
-
-**Server → Client: bắt đầu câu hỏi**
+Mọi thông điệp gửi nhận hai chiều đều tuân thủ cấu trúc JSON Envelope chuẩn:
 
 ```json
 {
-  "type": "question.start", "v": 1, "seq": 12,
+  "type": "answer.submit",
+  "v": 1,
+  "data": { }
+}
+```
+
+| Trường | Kiểu | Bắt buộc | Ý nghĩa |
+|---|---|:---:|---|
+| `type` | string | Có | Tên định danh của loại thông điệp (xem mục 3 và 4) |
+| `v` | integer | Có | Phiên bản giao thức (hiện tại `v = 1`). Server từ chối `v != 1` bằng thông điệp `error` mã `UNSUPPORTED_VERSION` |
+| `data` | object | Có | Dữ liệu chi tiết của thông điệp |
+
+Thông điệp có `type` ngoài danh mục, sai kiểu JSON, hoặc thiếu `v` sẽ bị Server từ chối bằng `error` mã `BAD_MESSAGE`, **tuyệt đối không làm thay đổi trạng thái trận đấu** (FR-GAME-22).
+
+
+## 3. Danh mục thông điệp Server → Client
+
+| `type` | Đối tượng nhận | Khi nào | Nội dung chính |
+|---|---|---|---|
+| `lobby.update` | Host, Player | Người chơi vào/ra/bị kick ở phòng chờ | `game_id`, `pin`, `player_count`, `new_player`, `kicked_player_id` |
+| `game.starting` | Host, Player | Host bấm bắt đầu trận đấu | `countdown_s` (đếm ngược 3 giây), `server_time` |
+| `question.start` | Host, Player | Bắt đầu một câu hỏi | `q_index`, `total_questions`, `question_id`, `content`, `type`, `points`, `time_limit_s`, `server_time`, `deadline`, `options`. **Tuyệt đối không chứa `is_correct` (FR-GAME-08)** |
+| `answer.ack` | Player nộp bài | Ngay sau khi gọi Lua `submit_answer` | `accepted` (bool), `q_index`, `reason` (`LATE`, `ALREADY_ANSWERED`, `NOT_ACTIVE`). **Không lộ đáp án đúng hay điểm số (FR-GAME-07)** |
+| `question.result` | Host, Player | Hết giờ làm bài hoặc 100% người chơi đã nộp | `q_index`, `correct_option_ids`, `distribution`, `explanation`, `podium` (Top 5). Đối với từng Player: kèm phần cá nhân hóa `personal` (`score`, `added_score`, `streak`, `rank`, `is_correct`) |
+| `game.finished` | Host, Player | Trận đấu kết thúc hoàn toàn | `game_id`, `podium` (Top 3 chung cuộc), `total_players`. Kèm thông tin cá nhân `personal` (`score`, `rank`) |
+| `player.kicked` | Player bị kick | Host kick người chơi | `player_id`, `reason` |
+| `snapshot` | Client kết nối / kết nối lại | Ngay sau khi mở WS thành công | Trạng thái toàn diện: `status`, `q_index`, `total_questions`, `current_question` (nếu đang active, không lộ đáp án), `player_score`, `player_streak`, `player_rank`, `is_host` (FR-GAME-17) |
+| `error` | Client gửi sai lệnh | Lỗi phân quyền, sai cú pháp, rate limit | `code` (`FORBIDDEN`, `RATE_LIMITED`, `BAD_MESSAGE`, v.v.), `message` |
+
+
+## 4. Danh mục thông điệp Client → Server
+
+| `type` | Ai gửi | Mô tả | Xử lý & Ràng buộc nghiệp vụ |
+|---|---|---|---|
+| `heartbeat` | Player, Host | Cập nhật presence định kỳ mỗi 15s (FR-GAME-18) | Gia hạn khóa `game:{id}:presence:{client_id}` TTL 45s trên Redis. Quá 45s không có heartbeat bị coi là offline |
+| `snapshot.request` | Player, Host | Yêu cầu nhận lại snapshot trạng thái | Trả về snapshot mới nhất không lộ đáp án |
+| `game.start` | Host | Bắt đầu trận đấu từ LOBBY (FR-GAME-06, 14) | Chuyển trạng thái sang `question_active` câu 1 qua Lua script atomic |
+| `game.next` | Host | Chuyển sang câu hỏi tiếp theo (FR-GAME-14) | Kiểm tra chống bấm đúp (`expected_q_index`), mở câu hỏi mới qua Lua script atomic |
+| `game.end` | Host | Kết thúc trận đấu sớm (FR-GAME-14) | Chuyển trạng thái sang `finished`, tổng kết điểm và phát `game.finished` |
+| `player.kick` | Host | Loại người chơi khỏi phòng thi (FR-GAME-05) | Khóa cấm tham gia 10 phút trên Redis (`ex=600`), ngắt kết nối WS của player, phát `lobby.update` |
+| `answer.submit` | Player | Nộp bài cho câu hỏi hiện tại (FR-GAME-07, 09, 13) | Chấm điểm atomic qua Lua script: tính điểm theo chiến lược (`standard`/`binary`), bảo vệ lũy đẳng (chỉ ghi nhận lần đầu), kích hoạt đóng sớm nếu 100% người chơi đã nộp bài |
+
+> [!IMPORTANT]
+> **Phân quyền nghiêm ngặt:** Toàn bộ lệnh của Host (`game.start`, `game.next`, `game.end`, `player.kick`) chỉ chấp nhận từ kết nối mang cờ `is_host = True`. Người chơi gửi lệnh Host sẽ bị từ chối bằng `error` mã `FORBIDDEN` (FR-GAME-14). Host không được nộp bài (`answer.submit`).
+
+
+## 5. Quy tắc vận hành hệ thống
+
+1. **Đồng hồ chuẩn Server (Server-Authoritative Clock):**
+   - Mọi mốc thời gian đều căn cứ vào nguồn giờ nguyên tử `redis.time()` (epoch ms).
+   - Client sử dụng `server_time` và `deadline` trong `question.start` để hiển thị đồng hồ đếm ngược.
+   - Đáp án gửi đến server sau `deadline + 500 ms` bị từ chối với lý do `reason="LATE"` (FR-GAME-06, 07).
+2. **Tuyệt đối không lộ đáp án (FR-GAME-08):**
+   - Thông điệp `question.start` và `snapshot` tuyệt đối không bao giờ chứa trường `is_correct` hay đáp án đúng.
+   - `answer.ack` chỉ xác nhận đã ghi nhận nộp bài (`accepted=true`), không bao giờ thông báo đúng/sai.
+3. **Tính lũy đẳng (Idempotency - FR-GAME-09):**
+   - Người chơi nộp nhiều lần cho một câu hỏi chỉ được tính điểm và cập nhật bảng xếp hạng ở lần đầu tiên. Các lần gửi tiếp theo trả `accepted=false`, `reason="ALREADY_ANSWERED"`.
+4. **Giới hạn tốc độ kết nối (Rate Limiting - FR-GAME-21):**
+   - Mỗi kết nối WebSocket bị giới hạn tối đa 5 thông điệp / giây (thuật toán Token Bucket).
+   - Các gói tin vượt ngưỡng bị từ chối với `error` mã `RATE_LIMITED`.
+5. **Cơ chế đóng sớm (Early Close - FR-GAME-15):**
+   - Khi 100% người chơi trong phòng nộp bài (`all_answered = True`), câu hỏi lập tức đóng sớm mà không cần đợi hết giờ đếm ngược.
+6. **Cá nhân hóa kết quả (Personalization - FR-GAME-16):**
+   - Thông điệp `question.result` và `game.finished` được cá nhân hóa cho từng người chơi qua 1 lượt pipeline duy nhất trên Redis per replica, chứa chính xác điểm số, chuỗi thắng và thứ hạng hiện tại của người đó.
+
+
+## 6. Bảng mã lỗi `error`
+
+| Mã lỗi (`code`) | Ý nghĩa chi tiết |
+|---|---|
+| `BAD_MESSAGE` | Dữ liệu gửi lên không đúng định dạng JSON, sai kiểu dữ liệu hoặc thiếu trường bắt buộc |
+| `UNSUPPORTED_VERSION` | Phiên bản giao thức `v` không được hỗ trợ (chỉ chấp nhận `v=1`) |
+| `FORBIDDEN` | Người chơi cố ý gửi lệnh của Host hoặc Host cố ý nộp bài |
+| `INVALID_STATE` | Lệnh gửi không phù hợp với trạng thái hiện tại của trận đấu |
+| `RATE_LIMITED` | Gửi quá 5 thông điệp trong vòng 1 giây |
+| `DATA_NOT_FOUND` | Không tìm thấy dữ liệu câu hỏi hoặc snapshot của trận đấu |
+| `TRANSITION_FAILED` | Lệnh chuyển trạng thái bị từ chối |
+| `VERSION_MISMATCH` | Lệnh `game.next` bị gửi trùng lặp hoặc sai số thứ tự câu hỏi kỳ vọng (chống bấm đúp) |
+| `NO_MORE_QUESTIONS` | Đã hết câu hỏi trong bộ đề |
+
+
+## 7. Mẫu thông điệp chi tiết (Examples)
+
+### 7.1. Bắt đầu câu hỏi (`question.start`)
+```json
+{
+  "type": "question.start",
+  "v": 1,
   "data": {
-    "index": 3,
-    "content": "HTTP status code nào nghĩa là Not Found?",
-    "options": [{"id": "a", "text": "200"}, {"id": "b", "text": "404"}, {"id": "c", "text": "500"}],
-    "time_limit": 20,
-    "server_time": 1761400000000,
-    "deadline":    1761400020000
+    "q_index": 1,
+    "total_questions": 10,
+    "question_id": "c76f6ef4-2bf2-411a-8c76-5a41ea50e41b",
+    "content": "Thủ đô của Việt Nam là gì?",
+    "type": "single",
+    "points": 1000,
+    "time_limit_s": 15,
+    "server_time": 1762740000000,
+    "deadline": 1762740015000,
+    "options": [
+      {"id": "673f8e6c-0e7d-4cb4-b52e-503d42c3584e", "position": 1, "content": "Hà Nội"},
+      {"id": "766c5d18-2e06-40e9-bca1-ef776e01a8ef", "position": 2, "content": "TP. Hồ Chí Minh"},
+      {"id": "c1f7274f-9e67-4a0b-8515-56fa1e2b694b", "position": 3, "content": "Đà Nẵng"},
+      {"id": "93b2a30b-9aa0-449e-a035-7c01b2a26569", "position": 4, "content": "Cần Thơ"}
+    ]
   }
 }
 ```
 
-**Client → Server: nộp đáp án**
-
+### 7.2. Người chơi nộp bài (`answer.submit`)
 ```json
-{ "type": "answer.submit", "v": 1, "seq": 5, "data": { "question_index": 3, "option_ids": ["b"] } }
+{
+  "type": "answer.submit",
+  "v": 1,
+  "data": {
+    "q_index": 1,
+    "selected_option_ids": ["673f8e6c-0e7d-4cb4-b52e-503d42c3584e"],
+    "client_sent_epoch_ms": 1762740003500
+  }
+}
 ```
 
-**Server → Client: đáp án bị từ chối vì trễ (FR-GAME-07)**
-
+### 7.3. Server xác nhận nộp bài (`answer.ack`)
 ```json
-{ "type": "answer.ack", "v": 1, "seq": 13, "data": { "accepted": false, "reason": "LATE" } }
+{
+  "type": "answer.ack",
+  "v": 1,
+  "data": {
+    "accepted": true,
+    "q_index": 1,
+    "reason": null
+  }
+}
+```
+
+### 7.4. Kết quả câu hỏi (`question.result`)
+```json
+{
+  "type": "question.result",
+  "v": 1,
+  "data": {
+    "q_index": 1,
+    "correct_option_ids": ["673f8e6c-0e7d-4cb4-b52e-503d42c3584e"],
+    "distribution": {
+      "673f8e6c-0e7d-4cb4-b52e-503d42c3584e": 42,
+      "766c5d18-2e06-40e9-bca1-ef776e01a8ef": 6,
+      "c1f7274f-9e67-4a0b-8515-56fa1e2b694b": 2,
+      "93b2a30b-9aa0-449e-a035-7c01b2a26569": 0
+    },
+    "explanation": "Hà Nội là thủ đô của nước Cộng hòa Xã hội Chủ nghĩa Việt Nam.",
+    "podium": [
+      {"rank": 1, "player_id": "893c...", "nickname": "TopG", "score": 985, "streak": 1},
+      {"rank": 2, "player_id": "4b1a...", "nickname": "Speedy", "score": 960, "streak": 1}
+    ],
+    "personal": {
+      "score": 985,
+      "added_score": 985,
+      "streak": 1,
+      "rank": 1,
+      "is_correct": true
+    }
+  }
+}
+```
+
+### 7.5. Trận đấu hoàn thành (`game.finished`)
+```json
+{
+  "type": "game.finished",
+  "v": 1,
+  "data": {
+    "game_id": "a98402c5-7b56-4089-a2e9-441d8e03e2c3",
+    "total_players": 50,
+    "podium": [
+      {"rank": 1, "player_id": "893c...", "nickname": "TopG", "score": 9450, "streak": 8},
+      {"rank": 2, "player_id": "4b1a...", "nickname": "Speedy", "score": 9120, "streak": 5},
+      {"rank": 3, "player_id": "7a3f...", "nickname": "Star", "score": 8780, "streak": 6}
+    ],
+    "personal": {
+      "score": 9450,
+      "rank": 1
+    }
+  }
+}
 ```

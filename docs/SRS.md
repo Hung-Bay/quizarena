@@ -7,6 +7,7 @@
 | 0.1 | 25/10/2026 | Hùng | Baseline cuối Phase 0: mục 1–3 (giới thiệu, mô tả tổng quan, yêu cầu chức năng). Mục 4–8 để trống, bổ sung ở các phase sau |
 | 0.2 | 03/11/2026 | Hùng | Cập nhật Phase 1: Thêm sơ đồ trình tự xác thực, refresh rotation, guest token, ws-ticket (Mục 7) và Ma trận truy vết RTM cho Auth/RBAC (Mục 8) |
 | 0.3 | 05/11/2026 | Hùng | Cập nhật Phase 2: Pipeline AI Sinh Quiz (Gemini, ARQ, SSE), Rate Limiting (Redis Lua), Caching, 2-Layer Validation, Chống Prompt Injection, CRUD Quiz & Bộ luật QZ-2/3, Public/Clone Quiz (QZ-5) |
+| 0.4 | 10/11/2026 | Hùng | Cập nhật Phase 3: Live Game Engine (Redis Lua Scripts nguyên tử, Leaderboard ZSET, Game Clock tự động/đóng sớm, Write-Behind đối soát PostgreSQL, WebSocket v=1, Rate Limit 5 msg/s, CLI Bots 50 concurrent, Phiên bản hóa Quiz QZ-4) |
 
 **Mục lục:** 1. Giới thiệu · 2. Mô tả tổng quan · 3. Yêu cầu chức năng · 4. Yêu cầu giao diện ngoài · 5. Yêu cầu phi chức năng · 6. Yêu cầu dữ liệu · 7. Use case & Sequence Diagrams · 8. Ma trận truy vết (RTM) · Phụ lục A (ma trận quyền) · Phụ lục B (đối chiếu đề bài)
 
@@ -701,6 +702,35 @@ sequenceDiagram
 | **FR-AIGEN-11** | Chống PDF Prompt Injection & Data Isolation | `app.ai.gemini_gateway`, `app.worker` | `test_pdf_prompt_injection.py` (5 tests) | ✅ Done |
 | **FR-AIGEN-12** | Redis Lua Rate Limiter (RPM & RPD Pacific), FakeGemini 429 backoff, Cấm SDK ngoài gateway | `gemini_rate_limiter.py`, `pyproject.toml` | `test_gemini_rate_limiter.py`<br/>`test_gemini_sdk_boundary.py` | ✅ Done |
 | **FR-AIGEN-13** | CLI tra cứu hạn mức Gemini (`gemini-quota`) | `app.cli` (`gemini-quota`) | `test_cli.py::test_gemini_quota_in_thong_tin` | ✅ Done |
+
+### 8.3. Phase 3 — Live Game Engine (Realtime State Machine, Redis Lua, WebSocket & Write-Behind)
+
+| Req ID | Mô tả yêu cầu | API / CLI / Module | Test Case / Bằng chứng xác minh | Trạng thái |
+|---|---|---|---|:---:|
+| **FR-GAME-01** | Tạo trận đấu từ Quiz đã xuất bản, sinh PIN 6 số | `POST /api/v1/games` | `test_game_flow.py::test_tao_tran_dau_thanh_cong_tu_quiz_published` | ✅ Done |
+| **FR-GAME-02** | Bản sao Snapshot Quiz bất biến lưu vào `game_sessions` | `app.services.game_service` | `test_game_flow.py::test_quiz_snapshot_duoc_luu_bat_bien_vao_database` | ✅ Done |
+| **FR-GAME-03** | Tham gia phòng chờ qua PIN, cấp Guest Token 3h | `POST /api/v1/games/join` | `test_game_flow.py::test_join_game_thanh_cong_va_nhan_guest_token` | ✅ Done |
+| **FR-GAME-04** | Kiểm tra Nickname (2–20 ký tự, lọc thô tục, cấm trùng tên) | `app.services.game_service` | `test_game_flow.py::test_join_game_nickname_trung_lap_bi_409`<br/>`test_game_flow.py::test_join_game_nickname_tho_tuc_bi_400` | ✅ Done |
+| **FR-GAME-05** | Host kick người chơi, cấm tham gia lại 10 phút | `player.kick` (WS) | `test_game_websocket.py::test_host_kick_player_thanh_cong_va_chan_ket_noi` | ✅ Done |
+| **FR-GAME-06** | Đồng hồ server-authoritative (`TIME` ms, `server_time`, `deadline`) | `app.game.lua_engine` | `test_game_lua.py::test_lua_start_game_tao_deadline_chinh_xac` | ✅ Done |
+| **FR-GAME-07** | Từ chối đáp án trễ (> deadline + 500ms trả `reason="LATE"`) | `submit_answer.lua` | `test_game_lua.py::test_lua_submit_answer_tre_han_bi_tu_choi_late` | ✅ Done |
+| **FR-GAME-08** | Tuyệt đối không lộ đáp án đúng ở `question.start` và snapshot | `app.realtime.handlers` | `test_game_websocket.py::test_question_start_va_snapshot_khong_chua_is_correct` | ✅ Done |
+| **FR-GAME-09** | Tính lũy đẳng (nộp lại trả `ALREADY_ANSWERED`, không cộng điểm lần 2) | `submit_answer.lua` | `test_game_lua.py::test_lua_submit_answer_idempotent_lan_hai_bi_tu_choi` | ✅ Done |
+| **FR-GAME-10** | Tính điểm suy giảm theo tốc độ (StandardScoring, Half-up) | `app.game.scoring` | `test_game_scoring.py::test_standard_scoring_tinh_diem_chinh_xac_half_up` | ✅ Done |
+| **FR-GAME-11** | Thưởng chuỗi đúng liên tiếp (Streak bonus $\ge 2$ câu) | `app.game.scoring` | `test_game_scoring.py::test_streak_bonus_tang_dan` | ✅ Done |
+| **FR-GAME-12** | Chấm điểm câu nhiều đáp án (Multi-select, phạt chọn sai) | `app.game.scoring` | `test_game_scoring.py::test_multiple_choice_scoring_chia_deu_va_tru_sai` | ✅ Done |
+| **FR-GAME-13** | Xử lý nộp bài nguyên tử trên Redis Lua (ZSET lb, HINCRBY stats, Stream) | `submit_answer.lua` | `test_game_lua.py::test_lua_submit_answer_thanh_cong_cap_nhat_lb_va_stream` | ✅ Done |
+| **FR-GAME-14** | State Machine điều khiển bởi Host (`start`, `next`, `end`, chống bấm đúp) | `transition.lua` | `test_game_lua.py::test_lua_transition_chong_bam_dup_bang_expected_q` | ✅ Done |
+| **FR-GAME-15** | Game Clock tự động đóng khi hết giờ & Đóng sớm khi 100% nộp bài | `app.game.clock` | `test_game_clock_and_write_behind.py::test_auto_close_question_khi_het_deadline`<br/>`test_game_clock_and_write_behind.py::test_early_close_khi_100_percent_nop_bai` | ✅ Done |
+| **FR-GAME-16** | Công bố kết quả câu hỏi (`question.result`, Top 5, cá nhân hóa `personal`) | `app.realtime.connection_manager` | `test_game_clock_and_write_behind.py::test_broadcast_personalized_question_result` | ✅ Done |
+| **FR-GAME-17** | Phục hồi phiên khi rớt mạng bằng Game Snapshot | `app.realtime.snapshot` | `test_game_websocket.py::test_reconnect_tra_snapshot_chinh_xac_khong_lo_dap_an` | ✅ Done |
+| **FR-GAME-18** | Theo dõi hiện diện Online/Offline (Heartbeat 15s, TTL 45s) | `app.realtime.handlers` | `test_game_websocket.py::test_heartbeat_lam_moi_presence_ttl_45s` | ✅ Done |
+| **FR-GAME-19** | Write-Behind ghi lô PostgreSQL và đối soát số lượng | `app.game.write_behind` | `test_game_clock_and_write_behind.py::test_write_behind_ghi_lo_va_doi_soat_khop_100_percent` | ✅ Done |
+| **FR-GAME-20** | Giới hạn quy mô (500 người chơi/trận, 20 trận/host) | `app.services.game_service` | `test_game_flow.py::test_gioi_han_500_nguoi_choi_va_20_tran_dong_thoi` | ✅ Done |
+| **FR-GAME-21** | Giới hạn tốc độ WebSocket (5 thông điệp/giây/kết nối) | `ConnectionManager` | `test_game_websocket.py::test_rate_limiter_5_msg_s_chan_thong_diep_thu_6` | ✅ Done |
+| **FR-GAME-22** | Giao thức WebSocket v=1, kiểm tra envelope, từ chối an toàn | `MessageHandler` | `test_game_websocket.py::test_unsupported_version_va_bad_message_bi_tu_choi` | ✅ Done |
+| **FR-QUIZ-06** | Phiên bản hóa Quiz QZ-4 (sửa quiz đã có trận $\to$ tăng version, trận cũ bất biến) | `app.services.quiz_service` | `test_quiz_versioning.py::test_quiz_version_tang_khi_da_tung_co_tran_dau`<br/>`test_quiz_versioning.py::test_quiz_snapshot_bat_bien_khi_quiz_bi_sua_sau_do` | ✅ Done |
+| **CLI-BOTS** | Lệnh CLI bầy bot 50 concurrent join PIN, WS và nộp bài | `app.cli` (`bots`) | `test_cli_bots.py` (7 tests)<br/>`test_cli_bots.py::test_cli_bots_command_validation` | ✅ Done |
 
 
 

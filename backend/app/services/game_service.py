@@ -57,7 +57,7 @@ def _is_offensive_nickname(nickname: str) -> bool:
     return False
 
 
-def _build_quiz_snapshot(quiz: Quiz) -> dict[str, Any]:
+def build_quiz_snapshot(quiz: Quiz) -> dict[str, Any]:
     """Tạo snapshot JSON bất biến cho toàn bộ nội dung Quiz (QZ-4, GM-1)."""
     questions_list = []
     # Sắp xếp câu hỏi theo position tăng dần
@@ -95,6 +95,9 @@ def _build_quiz_snapshot(quiz: Quiz) -> dict[str, Any]:
         "total_questions": len(questions_list),
         "questions": questions_list,
     }
+
+
+_build_quiz_snapshot = build_quiz_snapshot
 
 
 async def create_game(
