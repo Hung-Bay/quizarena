@@ -102,3 +102,14 @@ async def update_session_status(
         game.ended_at = ended_at
     game.updated_at = datetime.now(UTC)
     await session.flush()
+
+
+async def count_sessions_by_quiz_id(session: AsyncSession, quiz_id: uuid.UUID) -> int:
+    """Đếm tổng số trận đấu đã từng được tạo cho bộ Quiz này (QZ-4, FR-QUIZ-06)."""
+    if not hasattr(session, "execute"):
+        return 0
+    stmt = select(func.count()).select_from(GameSession).where(GameSession.quiz_id == quiz_id)
+    result = await session.execute(stmt)
+    if result is None:
+        return 0
+    return int(result.scalar_one() or 0)

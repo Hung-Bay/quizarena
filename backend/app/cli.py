@@ -7,6 +7,20 @@ Trong container:                      python -m app.cli seed
 
 import asyncio
 import re
+import sys
+
+# Đảm bảo UTF-8 trên Windows console chống lỗi charmap UnicodeEncodeError
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
 
 import typer
 
@@ -170,6 +184,74 @@ def gemini_quota(
         except Exception as err:
             typer.echo(f"Lỗi kiểm thử: {err}", err=True)
             raise typer.Exit(code=1) from err
+
+
+@app.command("bots")
+def run_bots(
+    pin: str = typer.Option(..., "--pin", "-p", help="Mã PIN 6 số của phòng thi"),
+    count: int = typer.Option(50, "--count", "-c", help="Số lượng bot tham gia (tối đa 50)"),
+    base_url: str = typer.Option(
+        "http://localhost:8000", "--url", "-u", help="Địa chỉ API QuizArena (REST)"
+    ),
+    ws_url: str | None = typer.Option(
+        None, "--ws-url", "-w", help="Địa chỉ WebSocket (mặc định tự suy ra từ base_url)"
+    ),
+    jitter_min: float = typer.Option(
+        0.5, "--jitter-min", help="Độ trễ tối thiểu khi trả lời (giây)"
+    ),
+    jitter_max: float = typer.Option(2.0, "--jitter-max", help="Độ trễ tối đa khi trả lời (giây)"),
+    prefix: str = typer.Option("Bot", "--prefix", help="Tiền tố tên hiển thị của bot"),
+) -> None:
+    """Khởi chạy bầy bot đồng thời tham gia phòng thi live và nộp bài tự động (FR-GAME-01..06, 14, 16)."""
+    from app.game.bot_runner import BotConfig, BotManager
+
+    if count < 1 or count > 500:
+        typer.echo("Lỗi: Số lượng bot phải nằm trong khoảng từ 1 đến 500.", err=True)
+        raise typer.Exit(code=1)
+
+    pin_clean = pin.strip()
+    if not (len(pin_clean) == 6 and pin_clean.isdigit()):
+        typer.echo("Lỗi: Mã PIN phải gồm đúng 6 chữ số.", err=True)
+        raise typer.Exit(code=1)
+
+    config = BotConfig(
+        pin=pin_clean,
+        count=count,
+        base_url=base_url,
+        ws_url=ws_url,
+        jitter_min=jitter_min,
+        jitter_max=jitter_max,
+        prefix=prefix,
+    )
+
+    typer.echo("==================================================")
+    typer.echo(f"  QUIZARENA BOT RUNNER — PIN: {pin_clean}")
+    typer.echo(f"  Số bot        : {count}")
+    typer.echo(f"  Target URL    : {base_url}")
+    typer.echo(f"  Jitter trả lời: {jitter_min}s - {jitter_max}s")
+    typer.echo("==================================================")
+    typer.echo("Đang kết nối bot và lắng nghe trận đấu... (Nhấn Ctrl+C để dừng sớm)\n")
+
+    manager = BotManager(config)
+
+    try:
+        stats = asyncio.run(manager.start())
+    except KeyboardInterrupt:
+        typer.echo("\n[!] Nhận tín hiệu dừng từ người dùng. Đang đóng kết nối bot...")
+        asyncio.run(manager.stop())
+        stats = manager.stats
+
+    typer.echo("\n================ KẾT QUẢ HOẠT ĐỘNG BOT ================")
+    typer.echo(f"Tổng số bot dự kiến      : {stats.total_bots}")
+    typer.echo(f"Số bot đã join (REST)    : {stats.joined}")
+    typer.echo(f"Số bot kết nối WS        : {stats.connected}")
+    typer.echo(f"Số lượt nộp bài          : {stats.answers_submitted}")
+    typer.echo(f"Số lượt server chấp nhận : {stats.answers_accepted}")
+    typer.echo(f"Số bot hoàn thành trận   : {stats.completed}")
+    if stats.errors:
+        typer.echo(f"Tổng số lỗi phát sinh    : {len(stats.errors)}")
+        typer.echo(f"Lỗi đầu tiên ghi nhận    : {stats.errors[0]}")
+    typer.echo("=======================================================\n")
 
 
 if __name__ == "__main__":

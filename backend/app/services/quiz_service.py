@@ -11,6 +11,7 @@ from app.ai.schemas import AiGenerationParams
 from app.core.errors import AppError
 from app.core.rbac import RoleName
 from app.models.quiz import Question, QuestionOption, Quiz
+from app.repositories import game_repository
 from app.repositories import quiz_repository as repo
 from app.schemas.quiz import (
     QuestionCreate,
@@ -39,6 +40,15 @@ def _check_quiz_access(quiz: Quiz | None, user_id: uuid.UUID, user_roles: Sequen
         raise AppError("Quiz không tồn tại", code="QUIZ_NOT_FOUND", status_code=404)
 
     return quiz
+
+
+async def _bump_version_if_has_games(session: AsyncSession, quiz: Quiz | None) -> None:
+    """Tự động tăng version nếu quiz đã từng có trận đấu mở trước đó (QZ-4, FR-QUIZ-06)."""
+    if quiz is None:
+        return
+    has_games = await game_repository.count_sessions_by_quiz_id(session, quiz.id) > 0
+    if has_games:
+        quiz.version += 1
 
 
 async def create_quiz(session: AsyncSession, owner_id: uuid.UUID, data: QuizCreate) -> Quiz:
@@ -91,6 +101,7 @@ async def update_quiz(
     if data.tags is not None:
         quiz.tags = [t.strip() for t in data.tags if t.strip()]
 
+    await _bump_version_if_has_games(session, quiz)
     return await repo.update(session, quiz)
 
 
@@ -177,6 +188,7 @@ async def add_question(
         for idx, opt in enumerate(data.options, start=1)
     ]
 
+    await _bump_version_if_has_games(session, quiz)
     return await repo.add_question(session, question)
 
 
@@ -279,6 +291,7 @@ async def update_question(
         await repo.replace_question_options(session, question.id, new_opts)
         await session.refresh(question, ["options"])
 
+    await _bump_version_if_has_games(session, quiz)
     await session.flush()
     return question
 
@@ -300,6 +313,7 @@ async def delete_question(
             "Câu hỏi không tồn tại trong quiz", code="QUESTION_NOT_FOUND", status_code=404
         )
 
+    await _bump_version_if_has_games(session, quiz)
     await repo.delete_question(session, question)
 
 
@@ -326,6 +340,7 @@ async def reorder_questions(
         )
 
     await repo.reorder_questions(session, quiz_id, requested_ids)
+    await _bump_version_if_has_games(session, quiz)
     # Lấy lại quiz với thứ tự câu hỏi mới
     quiz_updated = await repo.get_by_id(session, quiz_id, include_questions=True)
     assert quiz_updated is not None
@@ -488,6 +503,9 @@ async def regenerate_question(
         for idx, opt in enumerate(draft_q.options, start=1)
     ]
     await repo.replace_question_options(session, question.id, new_opts)
+    quiz = await repo.get_by_id(session, quiz_id, include_questions=False)
+    if quiz:
+        await _bump_version_if_has_games(session, quiz)
     await session.flush()
     await session.refresh(question, ["options"])
     return question

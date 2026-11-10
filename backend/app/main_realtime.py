@@ -154,6 +154,8 @@ async def game_websocket(
         nickname=nickname,
         is_host=is_host,
     )
+    # Đánh dấu trạng thái online ban đầu (TTL 45s, làm mới định kỳ qua heartbeat 15s - FR-GAME-18)
+    await redis.set(f"game:{game_id}:presence:{client_id}", "1", ex=45)
 
     try:
         # 5. Gửi snapshot trạng thái hiện tại ngay sau khi kết nối thành công (FR-GAME-17)
@@ -189,4 +191,5 @@ async def game_websocket(
     except Exception as exc:  # noqa: BLE001
         log.debug("Lỗi kết nối WebSocket của client %s (game %s): %s", client_id, game_id, exc)
     finally:
+        await redis.delete(f"game:{game_id}:presence:{client_id}")
         await manager.disconnect(game_id, client_id)
