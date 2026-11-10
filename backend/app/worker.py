@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.ai.gemini_gateway import create_gemini_gateway
 from app.ai.schemas import AiGenerationParams, QuestionDraft, QuizDraft
 from app.core.config import get_settings
+from app.game import clock, write_behind
 from app.models.ai import Document
 from app.models.quiz import Question, QuestionOption, Quiz
 from app.repositories import ai_repository
@@ -377,11 +378,28 @@ async def generate_quiz_task(ctx: dict[str, Any], job_id_str: str) -> dict[str, 
         return {"status": "failed", "error": str(exc)}
 
 
+async def close_question_task(ctx: dict[str, Any], game_id: str, q_index: int) -> dict[str, Any]:
+    """Task hẹn giờ tự động đóng câu hỏi và phát question.result (FR-GAME-15, ADR-003)."""
+    redis: Redis = ctx["redis"]
+    ok = await clock.close_and_broadcast_question(redis, game_id=game_id, q_index=q_index)
+    return {"status": "succeeded" if ok else "ignored", "game_id": game_id, "q_index": q_index}
+
+
+async def flush_game_answers_task(ctx: dict[str, Any], game_id: str) -> dict[str, Any]:
+    """Task nền flush dữ liệu từ Redis Stream vào PostgreSQL (FR-GAME-19)."""
+    session_factory = ctx["session_factory"]
+    redis: Redis = ctx["redis"]
+    async with session_factory() as session:
+        count = await write_behind.flush_answers_to_db(session, redis, game_id=game_id)
+    return {"status": "succeeded", "game_id": game_id, "flushed_count": count}
+
+
 class WorkerSettings:
     """Cấu hình khởi chạy của ARQ Worker."""
 
-    functions = [ping, generate_quiz_task]
+    functions = [ping, generate_quiz_task, close_question_task, flush_game_answers_task]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
     max_tries = 1  # Không tự động thử lại ở tầng ARQ để bảo vệ quota Gemini
+    poll_delay = 0.1  # Giảm độ trễ quét job xuống 100ms để đồng hồ trận đóng chính xác (ADR-003)

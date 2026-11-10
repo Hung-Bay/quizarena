@@ -455,6 +455,13 @@ async def test_ws_player_submit_answer_ack_and_idempotency(redis_client):
     hid = str(uuid.uuid4())
     pid = str(uuid.uuid4())
     opts = await setup_test_game_session(redis_client, game_id=gid, host_id=hid, player_id=pid)
+    # Thêm player 2 vào phòng để không kích hoạt đóng sớm ngay khi player 1 nộp bài
+    other_pid = str(uuid.uuid4())
+    await redis_client.hset(
+        f"game:{gid}:players",
+        "player_two",
+        json.dumps({"id": other_pid, "nickname": "PlayerTwo", "online": True}),
+    )
 
     host_ticket = await create_test_ticket(redis_client, game_id=gid, sub=hid, is_host=True)
     player_ticket = await create_test_ticket(redis_client, game_id=gid, sub=pid, is_host=False)
