@@ -17,6 +17,7 @@ services:
       <<: *dev-env
     volumes:
       - ./backend/app:/app/app:ro      # sửa code trên máy → container tự nạp lại
+      - ./backend/alembic:/app/alembic:ro
 
   realtime:
     command:
@@ -31,6 +32,7 @@ services:
       HEALTH_URL: http://127.0.0.1:8000/healthz
     volumes:
       - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
 
   worker:
     environment:

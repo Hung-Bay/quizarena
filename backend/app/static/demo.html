@@ -364,23 +364,28 @@
     function getApiBase() {
       const manual = document.getElementById("apiBaseUrl") ? document.getElementById("apiBaseUrl").value.trim() : "";
       if (manual) return manual.replace(/\/+$/, "");
-      // Nếu đang mở cổng 8001 (Realtime) thì API REST nằm ở cổng 8000
-      if (window.location.port === "8001") {
-        return `${window.location.protocol}//${window.location.hostname}:8000`;
+      // Nginx chạy ở cổng 80 (http://localhost). Nếu trang demo đang mở từ cổng khác (8001, 8000, hoặc file://),
+      // luôn ưu tiên gọi qua Nginx http://localhost để vào Docker container có kết nối cơ sở dữ liệu!
+      if (window.location.port === "8001" || window.location.port === "8000" || window.location.protocol === "file:") {
+        return "http://localhost";
       }
-      // Ngược lại (Nginx cổng 80 hoặc cổng 8000 API)
       return window.location.origin;
     }
 
     function getWsUrl(ticket) {
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      // Nếu đang mở trực tiếp cổng 8000 (API) thì WS service nằm ở cổng 8001
-      if (window.location.port === "8000") {
-        return `${wsProtocol}//${window.location.hostname}:8001/ws/game?ticket=${ticket}`;
+      if (window.location.port === "8000" || window.location.protocol === "file:") {
+        return `${wsProtocol}//localhost/ws/game?ticket=${ticket}`;
       }
-      // Ngược lại (Nginx cổng 80 hoặc Realtime cổng 8001)
       return `${wsProtocol}//${window.location.host}/ws/game?ticket=${ticket}`;
     }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      const apiInput = document.getElementById("apiBaseUrl");
+      if (apiInput && (window.location.port === "8001" || window.location.port === "8000" || window.location.protocol === "file:")) {
+        apiInput.value = "http://localhost";
+      }
+    });
 
     function logHost(msg) {
       const box = document.getElementById("hostLog");

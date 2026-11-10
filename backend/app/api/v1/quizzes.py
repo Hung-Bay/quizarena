@@ -116,7 +116,7 @@ async def create_quiz(
     user_id = uuid.UUID(claims["sub"])
     async with session.begin():
         quiz = await quiz_service.create_quiz(session, user_id, body)
-    return _to_quiz_detail_response(quiz)
+        return _to_quiz_detail_response(quiz)
 
 
 @router.get("", response_model=list[QuizResponse])
@@ -160,7 +160,7 @@ async def get_quiz(
     user_roles = claims.get("roles", [])
     async with session.begin():
         quiz = await quiz_service.get_quiz(session, id, user_id, user_roles)
-    return _to_quiz_detail_response(quiz)
+        return _to_quiz_detail_response(quiz)
 
 
 @router.patch("/{id}", response_model=QuizResponse)
@@ -203,7 +203,7 @@ async def publish_quiz(
     user_roles = claims.get("roles", [])
     async with session.begin():
         quiz = await quiz_service.publish_quiz(session, id, user_id, user_roles)
-    return _to_quiz_detail_response(quiz)
+        return _to_quiz_detail_response(quiz)
 
 
 @router.post(
@@ -235,7 +235,7 @@ async def reorder_questions(
     user_roles = claims.get("roles", [])
     async with session.begin():
         quiz = await quiz_service.reorder_questions(session, id, user_id, user_roles, body)
-    return _to_quiz_detail_response(quiz)
+        return _to_quiz_detail_response(quiz)
 
 
 @router.get("/{id}/questions/{qid}", response_model=QuestionResponse)
@@ -296,7 +296,7 @@ async def clone_quiz(
     user_roles = claims.get("roles", [])
     async with session.begin():
         cloned = await quiz_service.clone_quiz(session, id, user_id, user_roles, body)
-    return _to_quiz_detail_response(cloned)
+        return _to_quiz_detail_response(cloned)
 
 
 @router.post(
