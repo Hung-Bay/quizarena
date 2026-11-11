@@ -13,13 +13,33 @@ Thực hiện:
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.game import GameSession, PlayerAnswer
+
+
+class QuestionStat(TypedDict):
+    question_id: str
+    q_index: int
+    content: str
+    topic: str
+    total_answers: int
+    correct_answers: int
+    accuracy_rate: float
+    average_response_ms: float
+    option_distribution: dict[str, int]
+
+
+class TopicStat(TypedDict):
+    topic: str
+    total_answers: int
+    correct_answers: int
+    accuracy_rate: float
+    mastery_level: str
 
 
 def calculate_mastery(accuracy: float) -> str:
@@ -73,7 +93,7 @@ async def aggregate_game_statistics(
         qid_str = str(a.question_id)
         answers_by_q.setdefault(qid_str, []).append(a)
 
-    question_stats_list = []
+    question_stats_list: list[QuestionStat] = []
     for idx, q in enumerate(questions_list, start=1):
         qid_str = str(q.get("id"))
         q_answers = answers_by_q.get(qid_str, [])
@@ -114,7 +134,7 @@ async def aggregate_game_statistics(
         topic_groups[top]["total_answers"] += qs["total_answers"]
         topic_groups[top]["correct_answers"] += qs["correct_answers"]
 
-    topic_stats_list = []
+    topic_stats_list: list[TopicStat] = []
     for topic_name, data in topic_groups.items():
         t_total = data["total_answers"]
         t_correct = data["correct_answers"]
