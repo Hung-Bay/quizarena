@@ -7,6 +7,7 @@ from app.models.game import GamePlayer, GameSession, PlayerAnswer
 from app.models.quiz import Question, QuestionOption, Quiz
 from app.models.rbac import Permission, Role, role_permissions, user_roles
 from app.models.refresh_token import RefreshToken
+from app.models.report import GameReport
 from app.models.user import User
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "Base",
     "Document",
     "GamePlayer",
+    "GameReport",
     "GameSession",
     "Permission",
     "PlayerAnswer",

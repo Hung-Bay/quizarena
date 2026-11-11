@@ -16,7 +16,12 @@ def create_app(
     lifespan: Callable[[FastAPI], AbstractAsyncContextManager[None]] | None = None,
 ) -> FastAPI:
     setup_logging(get_settings().log_level)
-    app = FastAPI(title=title, lifespan=lifespan)
+    app = FastAPI(
+        title=title,
+        lifespan=lifespan,
+        openapi_url="/api/v1/openapi.json",
+        docs_url="/api/docs",
+    )
 
     # add_middleware: cái thêm SAU CÙNG nằm NGOÀI CÙNG. Thứ tự mục tiêu (ngoài → trong):
     #   Sentry/GlitchTip → RequestID → Log → CORS → Metrics → Exception

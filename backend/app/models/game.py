@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.models.report import GameReport
 
 from sqlalchemy import (
     BigInteger,
@@ -69,6 +72,9 @@ class GameSession(Base):
     )
     answers: Mapped[list[PlayerAnswer]] = relationship(
         "PlayerAnswer", back_populates="session", cascade="all, delete-orphan"
+    )
+    report: Mapped[GameReport | None] = relationship(
+        "GameReport", back_populates="session", uselist=False, cascade="all, delete-orphan"
     )
 
 
