@@ -6,6 +6,8 @@ import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { JoinPage } from './pages/JoinPage';
+import { QuizListPage } from './pages/QuizListPage';
+import { QuizEditorPage } from './pages/QuizEditorPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 const queryClient = new QueryClient({
@@ -32,6 +34,33 @@ export const App: React.FC = () => {
               element={
                 <ProtectedRoute>
                   <DashboardPage />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/quizzes"
+              element={
+                <ProtectedRoute>
+                  <QuizListPage />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/quizzes/new"
+              element={
+                <ProtectedRoute>
+                  <QuizEditorPage />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/quizzes/:id/edit"
+              element={
+                <ProtectedRoute>
+                  <QuizEditorPage />
                 </ProtectedRoute>
               }
             />

@@ -17,11 +17,14 @@ from typing import Any
 from app.ai.gateway_interface import GeminiGatewayProtocol
 from app.ai.schemas import (
     AiGenerationParams,
+    GameReportDraft,
     GatewayUsage,
     GeneratedQuizResponse,
+    GeneratedReportResponse,
     QuestionDraft,
     QuestionOptionDraft,
     QuizDraft,
+    TopicAnalysis,
 )
 
 
@@ -51,6 +54,7 @@ class FakeGemini(GeminiGatewayProtocol):
         should_return_malformed_json: bool = False,
         should_timeout: bool = False,
         custom_draft: QuizDraft | None = None,
+        custom_report_draft: GameReportDraft | None = None,
         invalid_questions_count: int = 0,
         max_retries: int = 3,
     ) -> None:
@@ -60,11 +64,13 @@ class FakeGemini(GeminiGatewayProtocol):
         self.should_return_malformed_json = should_return_malformed_json
         self.should_timeout = should_timeout
         self.custom_draft = custom_draft
+        self.custom_report_draft = custom_report_draft
         self.invalid_questions_count = invalid_questions_count
         self.max_retries = max_retries
 
         self.call_count: int = 0
         self.call_history: list[dict[str, Any]] = []
+        self.last_stats: dict[str, Any] | None = None
 
     def _build_default_draft(self, params: AiGenerationParams) -> QuizDraft:
         """Tạo dữ liệu QuizDraft mẫu hợp lệ theo tham số."""
@@ -271,4 +277,72 @@ class FakeGemini(GeminiGatewayProtocol):
             source_ref="Tài liệu tham khảo",
             time_limit_s=20,
             points=1000,
+        )
+
+    async def generate_game_report(self, stats: dict[str, Any]) -> GeneratedReportResponse:
+        """Mô phỏng sinh báo cáo phân tích sư phạm bằng FakeGemini."""
+        self.call_count += 1
+        self.last_stats = stats
+        self.call_history.append({"method": "generate_game_report", "stats": stats})
+
+        if self.should_fail_429 or self.fail_429_count > 0:
+            if self.fail_429_count > 0:
+                self.fail_429_count -= 1
+            raise GeminiRateLimitError(
+                "FakeGemini rate limit 429", retry_delay=self.retry_delay_seconds
+            )
+
+        if self.should_timeout:
+            raise TimeoutError("FakeGemini timeout (90s)")
+
+        if self.should_return_malformed_json:
+            raise GeminiGatewayError("FakeGemini malformed JSON error")
+
+        if self.custom_report_draft:
+            draft = self.custom_report_draft
+        else:
+            topic_stats = stats.get("topic_stats", [])
+            strengths: list[TopicAnalysis] = []
+            weaknesses: list[TopicAnalysis] = []
+
+            for t in topic_stats:
+                top_name = t.get("topic", "Chung")
+                acc = t.get("accuracy_rate", 0.0)
+                if acc >= 0.5:
+                    strengths.append(
+                        TopicAnalysis(
+                            topic=top_name,
+                            analysis=f"Học viên thể hiện hiểu biết tốt về {top_name} với tỉ lệ đúng {acc * 100:.0f}%.",
+                        )
+                    )
+                else:
+                    weaknesses.append(
+                        TopicAnalysis(
+                            topic=top_name,
+                            analysis=f"Chủ đề {top_name} có tỉ lệ trả lời sai cao ({(1 - acc) * 100:.0f}%), cần củng cố.",
+                        )
+                    )
+
+            draft = GameReportDraft(
+                summary=(
+                    f"Trận đấu hoàn tất với {stats.get('total_players', 0)} người chơi. "
+                    f"Tỉ lệ đúng trung bình đạt {stats.get('overall_accuracy', 0.0) * 100:.1f}%."
+                ),
+                strengths=strengths,
+                weaknesses=weaknesses,
+                advice_for_host=(
+                    "Giảng viên nên dành thời gian giải thích kỹ các câu hỏi khó "
+                    "và hệ thống hóa lại các chủ đề học viên hay nhầm lẫn."
+                ),
+                advice_for_learner=(
+                    "Học viên cần tự ôn lại các khái niệm trong chủ đề có tỉ lệ đúng thấp "
+                    "và xem lại giải thích đáp án chi tiết."
+                ),
+            )
+
+        return GeneratedReportResponse(
+            draft=draft,
+            raw_json=draft.model_dump_json(),
+            usage=GatewayUsage(input_tokens=150, output_tokens=300, total_tokens=450),
+            model_name="fake-gemini-report",
         )

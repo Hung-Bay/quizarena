@@ -93,3 +93,38 @@ class GeneratedQuizResponse(BaseModel):
     raw_json: str
     usage: GatewayUsage
     model_name: str
+
+
+class TopicAnalysis(BaseModel):
+    """Phân tích một chủ đề kiến thức trong báo cáo."""
+
+    topic: str = Field(description="Tên chủ đề kiến thức")
+    analysis: str = Field(description="Nhận xét chi tiết về mức độ hiểu bài và điểm cần lưu ý")
+
+
+class GameReportDraft(BaseModel):
+    """Bản nháp báo cáo phân tích AI sau trận đấu."""
+
+    summary: str = Field(description="Nhận xét tổng quan tình hình làm bài của lớp học")
+    strengths: list[TopicAnalysis] = Field(
+        default_factory=list, description="Các chủ đề kiến thức học viên làm tốt (mastery >= 80%)"
+    )
+    weaknesses: list[TopicAnalysis] = Field(
+        default_factory=list,
+        description="Các chủ đề kiến thức học viên còn yếu, hay sai hoặc nhầm lẫn (mastery < 50%)",
+    )
+    advice_for_host: str = Field(
+        description="Chỉ dẫn sư phạm cho giảng viên/host (cần giải thích lại gì, bài tập bổ trợ nào)"
+    )
+    advice_for_learner: str = Field(
+        description="Khuyến nghị học tập chung cho học viên tự ôn tập kiến thức"
+    )
+
+
+class GeneratedReportResponse(BaseModel):
+    """Kết quả sinh báo cáo trận đấu từ Gemini Gateway."""
+
+    draft: GameReportDraft
+    raw_json: str
+    usage: GatewayUsage
+    model_name: str

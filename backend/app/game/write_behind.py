@@ -205,6 +205,25 @@ async def finalize_game_session(
     await redis.publish(f"game:{gid_str}", json.dumps(finished_envelope))
     log.info("Đã hoàn tất trận đấu %s và phát game.finished", gid_str)
 
+    # 8. Lập lịch sinh Báo cáo phân tích AI sau trận (FR-AIRPT-01..05)
+    try:
+        from arq.connections import RedisSettings, create_pool
+
+        from app.core.config import get_settings
+
+        pool = await create_pool(
+            RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())
+        )
+        await pool.enqueue_job(
+            "generate_game_report_task",
+            gid_str,
+            _job_id=f"report:{gid_str}",
+        )
+        await pool.close()
+        log.info("Đã enqueue ARQ job generate_game_report_task cho game %s", gid_str)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Không thể enqueue report job cho game %s: %s", gid_str, exc)
+
     return {
         "game_id": gid_str,
         "reconciled": is_reconciled,
