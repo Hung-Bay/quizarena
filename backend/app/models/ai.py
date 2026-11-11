@@ -11,7 +11,17 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -91,6 +101,11 @@ class AiJob(Base):
         nullable=True,
         index=True,
     )
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("game_sessions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     params: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         default=dict,
@@ -139,6 +154,8 @@ class AiJob(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+
+    __table_args__ = (UniqueConstraint("session_id", "kind", name="uq_ai_jobs_session_kind"),)
 
     creator: Mapped[User] = relationship("User", lazy="select")
     document: Mapped[Document | None] = relationship(

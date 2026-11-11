@@ -7,14 +7,15 @@ import os
 
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault(
-    "DATABASE_URL", "postgresql+asyncpg://quizarena:test@localhost:5432/quizarena"
+    "DATABASE_URL", "postgresql+asyncpg://quizarena:8521@localhost:5433/quizarena"
 )
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("REDIS_URL", "redis://:AK.Gamer1@localhost:6380/0")
 os.environ.setdefault("JWT_SECRET", "test-secret-" + "x" * 40)
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import create_engine
 
@@ -47,3 +48,18 @@ async def db_engine():
     engine = create_engine()
     yield engine
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session(db_engine):
+    """Cung cấp AsyncSession chạy trong transaction/savepoint tự rollback sau mỗi test."""
+    async with db_engine.connect() as connection:
+        trans = await connection.begin()
+        session = AsyncSession(
+            bind=connection, expire_on_commit=False, join_transaction_mode="create_savepoint"
+        )
+        try:
+            yield session
+        finally:
+            await session.close()
+            await trans.rollback()
