@@ -170,7 +170,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List Games
+         * @description Lấy danh sách các trận đấu do Host hiện tại đã tạo (GM-1, §3.7).
+         */
+        get: operations["list_games_api_v1_games_get"];
         put?: never;
         /**
          * Create Game
@@ -203,6 +207,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/games/{id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Game Report
+         * @description Lấy báo cáo phân tích trận đấu (FR-AIRPT-01..05, RP-6).
+         *
+         *     - Host: xem toàn bộ báo cáo phân tích tổng hợp.
+         *     - Player/Guest: xem báo cáo kèm nhận xét cá nhân hóa (0 lần gọi AI).
+         */
+        get: operations["get_game_report_api_v1_games__id__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/games/{id}/report/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Game Report
+         * @description Host thử lại sinh báo cáo AI nếu báo cáo đang ở trạng thái 'degraded' hoặc 'failed' (RP-5).
+         */
+        post: operations["retry_game_report_api_v1_games__id__report_retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/games/join": {
         parameters: {
             query?: never;
@@ -217,6 +264,26 @@ export interface paths {
          * @description Tham gia phòng chờ bằng mã PIN: nhận Guest Token (AU-9) hoặc gắn tài khoản nếu đã đăng nhập (AU-10).
          */
         post: operations["join_game_api_v1_games_join_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/games": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Game History
+         * @description Xem lịch sử các trận đấu người dùng đã tham gia (RP-6).
+         */
+        get: operations["get_my_game_history_api_v1_me_games_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -739,6 +806,78 @@ export interface components {
             /** Ended At */
             ended_at?: string | null;
         };
+        /** GameListItemResponse */
+        GameListItemResponse: {
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Pin */
+            pin: string;
+            /** Status */
+            status: string;
+            /**
+             * Quiz Id
+             * Format: uuid
+             */
+            quiz_id: string;
+            /** Quiz Title */
+            quiz_title: string;
+            /** Player Count */
+            player_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Ended At */
+            ended_at?: string | null;
+        };
+        /** GameReportResponse */
+        GameReportResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Status */
+            status: string;
+            /** Stats */
+            stats: {
+                [key: string]: unknown;
+            };
+            /** Summary */
+            summary: string;
+            /** Strengths */
+            strengths: {
+                [key: string]: unknown;
+            }[];
+            /** Weaknesses */
+            weaknesses: {
+                [key: string]: unknown;
+            }[];
+            /** Advice For Host */
+            advice_for_host: string;
+            /** Advice For Learner */
+            advice_for_learner: string;
+            /** Personal Feedback */
+            personal_feedback?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1169,6 +1308,24 @@ export interface components {
             /** Expires In */
             expires_in: number;
         };
+        /** UserGameHistoryItemResponse */
+        UserGameHistoryItemResponse: {
+            /**
+             * Game Id
+             * Format: uuid
+             */
+            game_id: string;
+            /** Quiz Title */
+            quiz_title: string;
+            /** Nickname */
+            nickname: string;
+            /** Final Score */
+            final_score: number;
+            /** Final Rank */
+            final_rank?: number | null;
+            /** Ended At */
+            ended_at?: string | null;
+        };
         /** UserOut */
         UserOut: {
             /**
@@ -1466,6 +1623,26 @@ export interface operations {
             };
         };
     };
+    list_games_api_v1_games_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameListItemResponse"][];
+                };
+            };
+        };
+    };
     create_game_api_v1_games_post: {
         parameters: {
             query?: never;
@@ -1530,6 +1707,68 @@ export interface operations {
             };
         };
     };
+    get_game_report_api_v1_games__id__report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_game_report_api_v1_games__id__report_retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     join_game_api_v1_games_join_post: {
         parameters: {
             query?: never;
@@ -1559,6 +1798,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_game_history_api_v1_me_games_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserGameHistoryItemResponse"][];
                 };
             };
         };

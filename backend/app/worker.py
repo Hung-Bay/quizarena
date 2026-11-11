@@ -35,6 +35,7 @@ from app.models.quiz import Question, QuestionOption, Quiz
 from app.repositories import ai_repository
 from app.services.gemini_rate_limiter import acquire_gemini_permit
 from app.services.quiz_rules import validate_question_data
+from app.services.report_service import generate_and_save_game_report
 
 log = logging.getLogger("arq.quizarena")
 
@@ -394,10 +395,42 @@ async def flush_game_answers_task(ctx: dict[str, Any], game_id: str) -> dict[str
     return {"status": "succeeded", "game_id": game_id, "flushed_count": count}
 
 
+async def generate_game_report_task(
+    ctx: dict[str, Any], session_id: str, is_retry: bool = False
+) -> dict[str, Any]:
+    """Task nền sinh Báo cáo phân tích AI sau trận đấu (FR-AIRPT-01..06)."""
+    session_factory = ctx["session_factory"]
+    redis: Redis = ctx["redis"]
+    gateway = ctx["gateway"]
+
+    gid_uuid = uuid.UUID(session_id)
+    async with session_factory() as session:
+        report = await generate_and_save_game_report(
+            session=session,
+            redis=redis,
+            gateway=gateway,
+            session_id=gid_uuid,
+            is_retry=is_retry,
+        )
+
+    return {
+        "status": "succeeded",
+        "session_id": session_id,
+        "report_id": str(report.id),
+        "report_status": report.status,
+    }
+
+
 class WorkerSettings:
     """Cấu hình khởi chạy của ARQ Worker."""
 
-    functions = [ping, generate_quiz_task, close_question_task, flush_game_answers_task]
+    functions = [
+        ping,
+        generate_quiz_task,
+        close_question_task,
+        flush_game_answers_task,
+        generate_game_report_task,
+    ]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url.get_secret_value())

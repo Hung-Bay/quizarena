@@ -6,7 +6,12 @@ tuyệt đối không import trực tiếp SDK `google.genai` ra ngoài gateway.
 
 from typing import Any, Protocol, runtime_checkable
 
-from app.ai.schemas import AiGenerationParams, GeneratedQuizResponse, QuestionDraft
+from app.ai.schemas import (
+    AiGenerationParams,
+    GeneratedQuizResponse,
+    GeneratedReportResponse,
+    QuestionDraft,
+)
 
 
 @runtime_checkable
@@ -37,4 +42,8 @@ class GeminiGatewayProtocol(Protocol):
         context: str | None = None,
     ) -> QuestionDraft:
         """Sinh lại một câu hỏi đơn lẻ dựa trên câu hỏi cũ và tham số bổ sung (FR-AIGEN-09)."""
+        ...
+
+    async def generate_game_report(self, stats: dict[str, Any]) -> GeneratedReportResponse:
+        """Sinh báo cáo phân tích sư phạm sau trận đấu từ số liệu thống kê (FR-AIRPT-01..05)."""
         ...

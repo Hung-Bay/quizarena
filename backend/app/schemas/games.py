@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -56,3 +56,38 @@ class JoinGameResponse(BaseModel):
     player_id: uuid.UUID
     nickname: str
     type: Literal["guest", "player"]
+
+
+class GameReportResponse(BaseModel):
+    id: uuid.UUID
+    session_id: uuid.UUID
+    status: str
+    stats: dict[str, Any]
+    summary: str
+    strengths: list[dict[str, Any]]
+    weaknesses: list[dict[str, Any]]
+    advice_for_host: str
+    advice_for_learner: str
+    personal_feedback: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class GameListItemResponse(BaseModel):
+    game_id: uuid.UUID
+    pin: str
+    status: str
+    quiz_id: uuid.UUID
+    quiz_title: str
+    player_count: int
+    created_at: datetime
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+
+
+class UserGameHistoryItemResponse(BaseModel):
+    game_id: uuid.UUID
+    quiz_title: str
+    nickname: str
+    final_score: int
+    final_rank: int | None = None
+    ended_at: datetime | None = None
