@@ -90,7 +90,7 @@ export async function apiRequest<T = any>(
   };
 
   if (!skipAuth) {
-    const token = tokenStore.getAccessToken();
+    const token = tokenStore.getAccessToken() || tokenStore.getGuestToken();
     if (token) {
       reqHeaders['Authorization'] = `Bearer ${token}`;
     }

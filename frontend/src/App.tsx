@@ -11,6 +11,8 @@ import { QuizEditorPage } from './pages/QuizEditorPage';
 import { HostGamePage } from './pages/HostGamePage';
 import { PlayerGamePage } from './pages/PlayerGamePage';
 import { AdminPage } from './pages/AdminPage';
+import { GameReportPage } from './pages/GameReportPage';
+import { HistoryPage } from './pages/HistoryPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 const queryClient = new QueryClient({
@@ -71,6 +73,13 @@ export const App: React.FC = () => {
             {/* Live Game Engine Routes */}
             <Route path="/play/:gameId" element={<PlayerGamePage />} />
             <Route path="/games/:gameId/play" element={<PlayerGamePage />} />
+
+            {/* Post-game AI Report & Feedback */}
+            <Route path="/games/:gameId/report" element={<GameReportPage />} />
+
+            {/* Match History */}
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/me/games" element={<HistoryPage />} />
 
             <Route
               path="/host/:gameId"

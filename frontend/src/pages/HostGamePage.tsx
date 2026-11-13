@@ -378,10 +378,17 @@ export const HostGamePage: React.FC = () => {
             </div>
 
             {/* Các nút hành động sau trận */}
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center justify-center gap-4">
+              <button
+                onClick={() => navigate(`/games/${gameId}/report`)}
+                className="px-8 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm cursor-pointer shadow-lg shadow-indigo-600/30 flex items-center gap-2 transition"
+              >
+                <BarChart3 className="w-4 h-4" />
+                <span>Xem Báo Cáo Phân Tích Lớp Học</span>
+              </button>
               <button
                 onClick={() => navigate(`/quizzes`)}
-                className="px-6 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm cursor-pointer"
+                className="px-6 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm cursor-pointer transition"
               >
                 Về Quản Lý Quiz
               </button>

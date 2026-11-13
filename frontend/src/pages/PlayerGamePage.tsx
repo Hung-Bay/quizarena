@@ -257,12 +257,20 @@ export const PlayerGamePage: React.FC = () => {
               </div>
             </div>
 
-            <button
-              onClick={() => navigate("/join")}
-              className="w-full py-4 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-base shadow-lg shadow-indigo-600/30 cursor-pointer"
-            >
-              Chơi Trận Khác
-            </button>
+            <div className="space-y-3 w-full">
+              <button
+                onClick={() => navigate(`/games/${gameId}/report`)}
+                className="w-full py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-base shadow-lg shadow-emerald-600/30 cursor-pointer flex items-center justify-center gap-2 transition"
+              >
+                <span>Xem Báo Cáo & Nhận Xét Cá Nhân</span>
+              </button>
+              <button
+                onClick={() => navigate("/join")}
+                className="w-full py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-sm cursor-pointer transition"
+              >
+                Chơi Trận Khác
+              </button>
+            </div>
           </div>
         )}
       </main>
