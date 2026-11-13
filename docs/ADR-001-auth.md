@@ -59,6 +59,18 @@ QuizArena là nền tảng thi đố realtime yêu cầu hệ thống xác thự
   3. Client mở kết nối: `wss://.../ws/game?ticket=...`.
   4. Server WebSocket dùng lệnh nguyên tử **`GETDEL`** để lấy định danh và xóa vé ngay lập tức. Vé không thể dùng lần 2.
 
+### 2.7. Vị trí lưu trữ Token phía Frontend & Single-Flight Interceptor (Phase 4 Quyết Định Chốt)
+- **User Access Token (In-Memory Only):**
+  - Lưu hoàn toàn trong biến bộ nhớ nội bộ (closure biến private trong `tokenStore.ts`), không ghi vào `localStorage` hay `sessionStorage`.
+  - Triệt tiêu 100% rủi ro bị script độc hại đánh cắp qua tấn công XSS.
+  - Phục hồi phiên (Silent Refresh): Khi người dùng F5 hoặc mở ứng dụng, `silentRefresh()` gọi `POST /api/v1/auth/refresh` bằng HttpOnly Cookie để lấy token mới.
+  - **Single-Flight Interceptor:** Khi có nhiều request đồng thời gặp lỗi 401 (ví dụ 10 request cùng lúc khi vừa hết hạn token 15 phút), client dùng 1 biến Promise singleton duy nhất (`activeRefreshPromise`). Chỉ duy nhất 1 request mạng được gửi lên server; 9 request còn lại chờ chung Promise này và tự động replay với token mới. Đã kiểm thử chứng minh qua `apiClient.test.ts`.
+- **Guest Token của người chơi (SessionStorage):**
+  - **Vị trí lưu:** `sessionStorage` của trình duyệt.
+  - **Lý do lựa chọn:** Người chơi tham gia trên điện thoại thường xuyên gặp tình huống vô tình vuốt reload trang (pull-to-refresh) hoặc xoay màn hình làm F5. Nếu lưu in-memory, người chơi sẽ bị mất danh tính và văng khỏi phòng thi.
+  - **Vì sao không dùng `localStorage`:** `sessionStorage` tự động bị hủy vĩnh viễn ngay khi tab đóng, không để lại dấu vết sang các phiên duyệt web tiếp theo.
+  - **Đánh giá rủi ro an toàn:** Guest token có phạm vi quyền hạn cực hẹp (`game:play` duy nhất cho `game_id` tương ứng), thời hạn tối đa 3 giờ, không có mật khẩu hay dữ liệu cá nhân. Giải pháp lưu `sessionStorage` mang lại trải nghiệm thi đấu ổn định mà vẫn đảm bảo tính an toàn cao.
+
 ---
 
 ## 3. Trả lời các câu hỏi bắt buộc (§3.2)

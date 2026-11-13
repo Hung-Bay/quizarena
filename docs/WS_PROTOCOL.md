@@ -61,6 +61,7 @@ Thông điệp có `type` ngoài danh mục, sai kiểu JSON, hoặc thiếu `v`
 | `answer.ack` | Player nộp bài | Ngay sau khi gọi Lua `submit_answer` | `accepted` (bool), `q_index`, `reason` (`LATE`, `ALREADY_ANSWERED`, `NOT_ACTIVE`). **Không lộ đáp án đúng hay điểm số (FR-GAME-07)** |
 | `question.result` | Host, Player | Hết giờ làm bài hoặc 100% người chơi đã nộp | `q_index`, `correct_option_ids`, `distribution`, `explanation`, `podium` (Top 5). Đối với từng Player: kèm phần cá nhân hóa `personal` (`score`, `added_score`, `streak`, `rank`, `is_correct`) |
 | `game.finished` | Host, Player | Trận đấu kết thúc hoàn toàn | `game_id`, `podium` (Top 3 chung cuộc), `total_players`. Kèm thông tin cá nhân `personal` (`score`, `rank`) |
+| `report.ready` | Host, Player | Báo cáo AI hoặc thống kê lớp học đã sinh xong | `game_id`, `report_id`, `status` (`ready` \| `degraded`), `has_ai_insights` (bool). Client tự động fetch `GET /api/v1/games/{id}/report` hoặc chuyển hướng sang trang báo cáo |
 | `player.kicked` | Player bị kick | Host kick người chơi | `player_id`, `reason` |
 | `snapshot` | Client kết nối / kết nối lại | Ngay sau khi mở WS thành công | Trạng thái toàn diện: `status`, `q_index`, `total_questions`, `current_question` (nếu đang active, không lộ đáp án), `player_score`, `player_streak`, `player_rank`, `is_host` (FR-GAME-17) |
 | `error` | Client gửi sai lệnh | Lỗi phân quyền, sai cú pháp, rate limit | `code` (`FORBIDDEN`, `RATE_LIMITED`, `BAD_MESSAGE`, v.v.), `message` |
@@ -219,4 +220,22 @@ Thông điệp có `type` ngoài danh mục, sai kiểu JSON, hoặc thiếu `v`
     }
   }
 }
+```
+
+### 7.6. Báo cáo AI sẵn sàng (`report.ready`)
+Phát ra sau khi ARQ worker hoàn tất tổng hợp số liệu và phân tích AI (hoặc chuyển sang chế độ degraded nếu AI gặp sự cố). Client nhận thông điệp này để tự động cập nhật UI từ "Đang phân tích..." sang hiển thị số liệu phân tích:
+```json
+{
+  "type": "report.ready",
+  "v": 1,
+  "data": {
+    "game_id": "a98402c5-7b56-4089-a2e9-441d8e03e2c3",
+    "report_id": "b18204d6-8c67-5190-b3f0-552e9f14f3d4",
+    "status": "ready",
+    "has_ai_insights": true,
+    "message": "Báo cáo phân tích trận đấu đã sẵn sàng."
+  }
+}
+```
+*Lưu ý: Nếu `status` là `"degraded"`, trường `has_ai_insights` mang giá trị `false`, client vẫn có thể lấy đầy đủ số liệu thống kê câu hỏi và chủ đề qua endpoint REST `/api/v1/games/{id}/report`.*
 ```
