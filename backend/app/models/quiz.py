@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -46,6 +46,10 @@ class Quiz(Base):
         ARRAY(String), server_default=text("ARRAY[]::varchar[]"), nullable=False
     )
     play_count: Mapped[int] = mapped_column(Integer, server_default=text("0"), nullable=False)
+    is_hidden: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False, index=True
+    )
+    hidden_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),

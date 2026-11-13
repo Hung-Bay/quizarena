@@ -114,6 +114,11 @@ class ConnectionManager:
                 self.pubsub_tasks[game_id] = task
                 log.info("Kích hoạt Pub/Sub listener cho game %s", game_id)
 
+            try:
+                await self.redis.incr("realtime:active_connections")
+            except Exception as e:
+                log.warning("Không thể tăng realtime:active_connections: %s", e)
+
         return conn
 
     async def disconnect(self, game_id: str, client_id: str) -> None:
@@ -129,6 +134,13 @@ class ConnectionManager:
                     self.active_connections.pop(game_id, None)
                     task_to_cancel = self.pubsub_tasks.pop(game_id, None)
                     pubsub_to_close = self.pubsubs.pop(game_id, None)
+
+            try:
+                cnt = await self.redis.decr("realtime:active_connections")
+                if cnt < 0:
+                    await self.redis.set("realtime:active_connections", 0)
+            except Exception as e:
+                log.warning("Không thể giảm realtime:active_connections: %s", e)
 
         if task_to_cancel:
             task_to_cancel.cancel()

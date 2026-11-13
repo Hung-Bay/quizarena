@@ -15,7 +15,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.fake import FakeGemini
@@ -350,3 +350,49 @@ async def test_player_personal_feedback_zero_ai_call(db_session: AsyncSession, f
     assert p2_feedback["final_rank"] == 2
     assert p2_feedback["accuracy_rate"] == 0.5
     assert p2_feedback["learning_advice"] == report.advice_for_learner
+
+
+@pytest.mark.asyncio
+async def test_single_call_invariant_and_sql_proof(db_session: AsyncSession, fake_redis):
+    """Tiêu chí DoD Thứ Năm: Chống '1 lần gọi' (job_id + ràng buộc DB) & bằng chứng SQL."""
+    game, _, _ = await _create_test_game_with_answers(db_session)
+    gateway = FakeGemini()
+
+    # Lần gọi thứ 1: sinh báo cáo bình thường
+    report1 = await generate_and_save_game_report(
+        session=db_session,
+        redis=fake_redis,  # type: ignore[arg-type]
+        gateway=gateway,
+        session_id=game.id,
+    )
+    assert report1.status == "ready"
+    assert gateway.call_count == 1
+
+    # Lần gọi thứ 2 (idempotent duplicate execution): không gọi lại AI
+    report2 = await generate_and_save_game_report(
+        session=db_session,
+        redis=fake_redis,  # type: ignore[arg-type]
+        gateway=gateway,
+        session_id=game.id,
+        is_retry=False,
+    )
+    assert report2.id == report1.id
+    assert gateway.call_count == 1  # Vẫn đúng 1 lần gọi duy nhất!
+
+    # Bằng chứng SQL 1: Không có bất kỳ session_id nào có > 1 dòng ai_jobs với kind = 'game_report'
+    sql_ai_jobs_proof = text(
+        "SELECT session_id, kind, count(*) as cnt FROM ai_jobs "
+        "WHERE kind = 'game_report' GROUP BY session_id, kind HAVING count(*) > 1"
+    )
+    res_ai_jobs = (await db_session.execute(sql_ai_jobs_proof)).all()
+    assert len(res_ai_jobs) == 0, "Vi phạm ràng buộc: Tồn tại nhiều hơn 1 ai_job cho một session"
+
+    # Bằng chứng SQL 2: Không có session_id nào có > 1 dòng trong game_reports
+    sql_reports_proof = text(
+        "SELECT session_id, count(*) as cnt FROM game_reports "
+        "GROUP BY session_id HAVING count(*) > 1"
+    )
+    res_reports = (await db_session.execute(sql_reports_proof)).all()
+    assert len(res_reports) == 0, (
+        "Vi phạm ràng buộc: Tồn tại nhiều hơn 1 game_report cho một session"
+    )

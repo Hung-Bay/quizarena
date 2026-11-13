@@ -34,9 +34,14 @@ export const DashboardPage: React.FC = () => {
               <User className="w-4 h-4 text-indigo-400" />
               <span className="font-medium text-slate-200">{user?.display_name || user?.email}</span>
               {user?.roles?.includes('ADMIN') && (
-                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  ADMIN
-                </span>
+                <Link
+                  to="/admin"
+                  className="px-2 py-0.5 text-xs font-bold rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition flex items-center gap-1"
+                  title="Trang Quản trị Hệ thống"
+                >
+                  <Shield className="w-3 h-3 text-amber-400" />
+                  <span>ADMIN PANEL</span>
+                </Link>
               )}
             </div>
 
@@ -101,15 +106,15 @@ export const DashboardPage: React.FC = () => {
             <div className="w-12 h-12 rounded-xl bg-cyan-600/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-4 group-hover:scale-105 transition-transform">
               <Sparkles className="w-6 h-6" />
             </div>
-            <h2 className="text-lg font-bold text-white mb-2">Báo Cáo Phân Tích AI</h2>
+            <h2 className="text-lg font-bold text-white mb-2">Lịch Sử & Báo Cáo AI</h2>
             <p className="text-slate-400 text-sm mb-4">
               Xem nhận xét tự động theo chủ đề, phát hiện lỗ hổng kiến thức và câu hỏi bẫy.
             </p>
             <Link
-              to="/reports"
+              to="/history"
               className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-400 hover:text-cyan-300"
             >
-              Xem danh sách báo cáo &rarr;
+              Xem lịch sử trận đấu &rarr;
             </Link>
           </div>
         </div>

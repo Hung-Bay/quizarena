@@ -8,6 +8,11 @@ import { DashboardPage } from './pages/DashboardPage';
 import { JoinPage } from './pages/JoinPage';
 import { QuizListPage } from './pages/QuizListPage';
 import { QuizEditorPage } from './pages/QuizEditorPage';
+import { HostGamePage } from './pages/HostGamePage';
+import { PlayerGamePage } from './pages/PlayerGamePage';
+import { AdminPage } from './pages/AdminPage';
+import { GameReportPage } from './pages/GameReportPage';
+import { HistoryPage } from './pages/HistoryPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 const queryClient = new QueryClient({
@@ -61,6 +66,44 @@ export const App: React.FC = () => {
               element={
                 <ProtectedRoute>
                   <QuizEditorPage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Live Game Engine Routes */}
+            <Route path="/play/:gameId" element={<PlayerGamePage />} />
+            <Route path="/games/:gameId/play" element={<PlayerGamePage />} />
+
+            {/* Post-game AI Report & Feedback */}
+            <Route path="/games/:gameId/report" element={<GameReportPage />} />
+
+            {/* Match History */}
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/me/games" element={<HistoryPage />} />
+
+            <Route
+              path="/host/:gameId"
+              element={
+                <ProtectedRoute>
+                  <HostGamePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/games/:gameId/host"
+              element={
+                <ProtectedRoute>
+                  <HostGamePage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Admin Management & Dashboard */}
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute>
+                  <AdminPage />
                 </ProtectedRoute>
               }
             />
