@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
@@ -18,15 +19,25 @@ from app.main_api import app
 from app.models.quiz import Quiz
 from app.models.rbac import Role, user_roles
 from app.models.user import User
+from app.services.seed import seed_rbac
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def ensure_rbac_seeded(db_engine: AsyncEngine) -> None:
+    """Đảm bảo bảng roles và permissions luôn được seed trước khi chạy các test của admin."""
+    session_factory = create_session_factory(db_engine)
+    async with session_factory() as session, session.begin():
+        await seed_rbac(session)
 
 
 @pytest_asyncio.fixture
-async def admin_user(db_engine: AsyncEngine) -> User:
+async def admin_user(db_engine: AsyncEngine) -> AsyncGenerator[User, None]:
     """Tạo người dùng với vai trò ADMIN và commit vào DB."""
     session_factory = create_session_factory(db_engine)
     async with session_factory() as session, session.begin():
         user = User(
-            email=f"admin_{uuid.uuid4().hex[:6]}@quizarena.com",
+            id=uuid.uuid4(),
+            email=f"admin_{uuid.uuid4().hex}@quizarena.com",
             password_hash=hash_password("admin_pass_123"),
             display_name="Admin Test",
             is_active=True,
@@ -41,7 +52,13 @@ async def admin_user(db_engine: AsyncEngine) -> User:
             await session.execute(
                 user_roles.insert().values(user_id=user.id, role_id=admin_role.id)
             )
-    return user
+        admin_id = user.id
+
+    yield user
+
+    async with db_engine.begin() as conn:
+        await conn.execute(text("DELETE FROM audit_logs WHERE actor_id = :uid"), {"uid": admin_id})
+        await conn.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": admin_id})
 
 
 @pytest.fixture
@@ -111,7 +128,7 @@ async def test_admin_ban_and_unban_user(
     session_factory = create_session_factory(db_engine)
     async with session_factory() as session, session.begin():
         target = User(
-            email=f"target_{uuid.uuid4().hex[:6]}@test.com",
+            email=f"target_{uuid.uuid4().hex}@test.com",
             password_hash=hash_password("target_123"),
             display_name="Target User",
             is_active=True,
@@ -152,6 +169,9 @@ async def test_admin_ban_and_unban_user(
             assert t_user.is_active is True
     finally:
         async with db_engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM audit_logs WHERE resource_id = :uid"), {"uid": str(target_id)}
+            )
             await conn.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": target_id})
 
 
@@ -165,7 +185,7 @@ async def test_admin_manage_user_role(
     session_factory = create_session_factory(db_engine)
     async with session_factory() as session, session.begin():
         target = User(
-            email=f"host_candidate_{uuid.uuid4().hex[:6]}@test.com",
+            email=f"host_candidate_{uuid.uuid4().hex}@test.com",
             password_hash=hash_password("candidate_123"),
             display_name="Candidate",
             is_active=True,
@@ -181,7 +201,9 @@ async def test_admin_manage_user_role(
             json={"role": "HOST", "action": "grant"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        assert res_grant.status_code == 200
+        assert res_grant.status_code == 200, (
+            f"Cấp vai trò thất bại: {res_grant.status_code} - {res_grant.text}"
+        )
         assert "HOST" in res_grant.json()["roles"]
 
         # 2. Thu hồi HOST
@@ -190,10 +212,15 @@ async def test_admin_manage_user_role(
             json={"role": "HOST", "action": "revoke"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        assert res_revoke.status_code == 200
+        assert res_revoke.status_code == 200, (
+            f"Thu hồi vai trò thất bại: {res_revoke.status_code} - {res_revoke.text}"
+        )
         assert "HOST" not in res_revoke.json()["roles"]
     finally:
         async with db_engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM audit_logs WHERE resource_id = :uid"), {"uid": str(target_id)}
+            )
             await conn.execute(text("DELETE FROM users WHERE id = :uid"), {"uid": target_id})
 
 
@@ -209,7 +236,7 @@ async def test_admin_hide_and_unhide_quiz(
     async with session_factory() as session, session.begin():
         quiz = Quiz(
             owner_id=admin_user.id,
-            title=f"Vi phạm bản quyền {uuid.uuid4().hex[:6]}",
+            title=f"Vi phạm bản quyền {uuid.uuid4().hex}",
             visibility="public",
             status="published",
             is_hidden=False,
@@ -253,6 +280,9 @@ async def test_admin_hide_and_unhide_quiz(
         assert res_unhide.json()["is_hidden"] is False
     finally:
         async with db_engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM audit_logs WHERE resource_id = :qid"), {"qid": str(quiz_id)}
+            )
             await conn.execute(text("DELETE FROM quizzes WHERE id = :qid"), {"qid": quiz_id})
 
 
