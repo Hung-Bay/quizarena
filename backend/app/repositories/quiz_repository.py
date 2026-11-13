@@ -48,7 +48,11 @@ async def list_public(
     """Lấy danh sách Quiz công khai và đã xuất bản (QZ-5)."""
     stmt = (
         select(Quiz)
-        .where(Quiz.visibility == "public", Quiz.status == "published")
+        .where(
+            Quiz.visibility == "public",
+            Quiz.status == "published",
+            Quiz.is_hidden.is_(False),
+        )
         .options(selectinload(Quiz.questions))
     )
     if tag:

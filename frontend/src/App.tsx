@@ -8,6 +8,9 @@ import { DashboardPage } from './pages/DashboardPage';
 import { JoinPage } from './pages/JoinPage';
 import { QuizListPage } from './pages/QuizListPage';
 import { QuizEditorPage } from './pages/QuizEditorPage';
+import { HostGamePage } from './pages/HostGamePage';
+import { PlayerGamePage } from './pages/PlayerGamePage';
+import { AdminPage } from './pages/AdminPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 const queryClient = new QueryClient({
@@ -61,6 +64,37 @@ export const App: React.FC = () => {
               element={
                 <ProtectedRoute>
                   <QuizEditorPage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Live Game Engine Routes */}
+            <Route path="/play/:gameId" element={<PlayerGamePage />} />
+            <Route path="/games/:gameId/play" element={<PlayerGamePage />} />
+
+            <Route
+              path="/host/:gameId"
+              element={
+                <ProtectedRoute>
+                  <HostGamePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/games/:gameId/host"
+              element={
+                <ProtectedRoute>
+                  <HostGamePage />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Admin Management & Dashboard */}
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute>
+                  <AdminPage />
                 </ProtectedRoute>
               }
             />
