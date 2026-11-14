@@ -248,7 +248,27 @@ def run_bots(
     typer.echo(f"Số lượt nộp bài          : {stats.answers_submitted}")
     typer.echo(f"Số lượt server chấp nhận : {stats.answers_accepted}")
     typer.echo(f"Số bot hoàn thành trận   : {stats.completed}")
+    summary = stats.summary()
+    bcast = summary["broadcast_delay_ms"]
+    if bcast["count"] > 0:
+        typer.echo("-------------------------------------------------------")
+        typer.echo("ĐỘ TRỄ BROADCAST QUESTION.START (NF-3 SLA: p95 < 500ms):")
+        typer.echo(
+            f"  Mẫu đo: {bcast['count']} | Min: {bcast['min']:.1f}ms | Avg: {bcast['avg']:.1f}ms"
+        )
+        typer.echo(
+            f"  p50: {bcast['p50']:.1f}ms | p90: {bcast['p90']:.1f}ms | p95: {bcast['p95']:.1f}ms | p99: {bcast['p99']:.1f}ms | Max: {bcast['max']:.1f}ms"
+        )
+    ack = summary["answer_rtt_ms"]
+    if ack["count"] > 0:
+        typer.echo("-------------------------------------------------------")
+        typer.echo("ROUND-TRIP TIME ANSWER.ACK (NF-2 Client-side RTT):")
+        typer.echo(f"  Mẫu đo: {ack['count']} | Min: {ack['min']:.1f}ms | Avg: {ack['avg']:.1f}ms")
+        typer.echo(
+            f"  p50: {ack['p50']:.1f}ms | p90: {ack['p90']:.1f}ms | p95: {ack['p95']:.1f}ms | p99: {ack['p99']:.1f}ms | Max: {ack['max']:.1f}ms"
+        )
     if stats.errors:
+        typer.echo("-------------------------------------------------------")
         typer.echo(f"Tổng số lỗi phát sinh    : {len(stats.errors)}")
         typer.echo(f"Lỗi đầu tiên ghi nhận    : {stats.errors[0]}")
     typer.echo("=======================================================\n")

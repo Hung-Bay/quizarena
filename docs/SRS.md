@@ -479,13 +479,34 @@ AC: **Given** hệ thống mới triển khai · **When** chạy lệnh tạo ad
 
 ---
 
-## 5. Yêu cầu phi chức năng (Phase 1)
+## 5. Yêu cầu phi chức năng (Non-Functional Requirements)
 
-- **NFR-SEC-01 (Mật khẩu):** Băm bằng Argon2id theo khuyến nghị RFC 9106. Không lưu mật khẩu gốc hoặc băm thô (MD5/SHA) trong bất kỳ trường hợp nào.
-- **NFR-SEC-02 (Refresh Token Storage):** Database chỉ lưu bản băm SHA-256 (hex) của refresh token.
-- **NFR-SEC-03 (Chống brute-force):** Khóa tạm thời 15 phút nếu sai 5 lần liên tiếp trên cùng cặp (email, IP).
-- **NFR-PERF-01 (Độ trễ API):** REST endpoint kiểm tra quyền qua JWT đạt độ trễ p95 < 200 ms.
-- **NFR-PERF-02 (Thời gian sống ws-ticket):** Vé WebSocket hết hạn sau 30 giây trong Redis.
+Hệ thống QuizArena phải đáp ứng nghiêm ngặt 10 chỉ tiêu phi chức năng cốt lõi (NF-1 đến NF-10) cùng các tiêu chuẩn an toàn bảo mật, trong đó **mọi dòng đều có con số đo lường định lượng cụ thể**:
+
+### 5.1. Các chỉ tiêu hiệu năng & độ tin cậy cốt lõi (NF-1 đến NF-10)
+
+| Mã | Tên chỉ tiêu | Con số định lượng bắt buộc (SLA Target) | Phương pháp đo lường & Số liệu thực tế đạt được (Phase 5) |
+|---|---|---|---|
+| **NF-1** | **Quy mô chịu tải & Toàn vẹn dữ liệu** | **300 người chơi đồng thời** trong 1 trận (hoặc 3 trận × 100) trên VM cấu hình giới hạn (free-tier equivalent 8 vCPU/8GB RAM); **Tỉ lệ mất đáp án = 0.0%**. | Load test bot runner: $N_{\text{ack}} == N_{\text{stream}} == N_{\text{pg}} == 300$. Đối soát thành công **100.0%** (0 đáp án bị mất). |
+| **NF-2** | **Độ trễ ghi nhận đáp án (`answer.ack`)** | Phía Server: **$p_{95} < 150\text{ ms}$**. | Metric Prometheus `game_answer_duration_seconds`: **$p_{95} = 9.5\text{ ms}$**; Client RTT $p_{95} = 7.3\text{ ms}$ (Nhanh gấp 15.7 lần SLA). |
+| **NF-3** | **Độ trễ phát sóng câu hỏi (`question.start`)** | Toàn bộ người chơi: **$p_{95} < 500\text{ ms}$** (tính từ `server_time` epoch ms đến lúc client nhận). | Bot ghi nhận thời gian nhận trừ `server_time`: **$p_{95} = 50.3\text{ ms}$** (kịch bản 3x100) và **$66.6\text{ ms}$** (kịch bản 1x300). Nhanh gấp 7.5–10 lần SLA. |
+| **NF-4** | **Hiệu năng REST endpoints thường** | **$p_{95} < 200\text{ ms}$** dưới tải 50 concurrent users gửi requests liên tục (Spawn rate: 10 users/s). | Kiểm thử Locust trên 1,242 requests: **$p_{95} = 27.0\text{ ms}$**, $p_{50} = 3.0\text{ ms}$, tỉ lệ lỗi **0.00%**. |
+| **NF-5** | **Khả năng chịu lỗi & Tự phục hồi Reconnect** | Người chơi tự kết nối lại trong **$< 3.0\text{ giây}$**, không mất điểm khi 1 replica bị dừng hoặc sập đột ngột giữa trận. | Chaos test: `docker stop` (Graceful drain) đạt **$p_{95} = 1.62\text{ s}$**; `docker kill` đạt **$p_{95} = 2.08\text{ s}$**. Điểm bảo toàn **100%**. |
+| **NF-6** | **Suy giảm mềm khi AI lỗi (Graceful Degradation)** | Khi Gemini lỗi hoặc hết quota ($= 0$), thời gian phản hồi chuyển fallback **$< 1.0\text{ giây}$**; hệ thống chơi bình thường 100%. | Tạo quiz thủ công, thi đấu bình thường; báo cáo chuyển trạng thái `degraded` hiển thị thống kê thuần, host có nút "Thử lại sau". |
+| **NF-7** | **Cấu trúc nhật ký quan sát (Observability)** | Định dạng **JSON 1 dòng** chứa 100% các trường ngữ cảnh `replica_id`, `game_id`, `user_id`, `request_id`. | Toàn bộ log của 1 trận đấu có thể tra cứu tức thì theo bộ lọc `game_id` trên Grafana Loki / ELK Stack. |
+| **NF-8** | **Độ bao phủ kiểm thử tự động (Test Coverage)** | Test coverage **$\ge 70.0\%$** cho toàn bộ mã nguồn thuộc các thư mục `services/`, `game/`, `core/security`. | CI Pipeline thực thi `pytest --cov` với báo cáo coverage chi tiết cho từng PR. |
+| **NF-9** | **An toàn đóng gói & Tối ưu Container** | Container chạy với người dùng non-root (UID **10001**); Dung lượng Docker image backend **$< 250\text{ MB}$**; Chỉ mở tối đa **3 cổng** (22, 80, 443) ra Internet. | Multi-stage build, loại bỏ dev tools/compilers trong image runtime; kiểm tra kích thước qua `docker image ls`. |
+| **NF-10**| **Sao lưu & Kế hoạch khôi phục thảm họa** | Sao lưu PostgreSQL tự động **1 lần/ngày**, lưu trữ tối thiểu **7 bản sao lưu**; Thời gian phục hồi mục tiêu **RTO $< 15\text{ phút}$**, **RPO $< 24\text{ giờ}$**. | Script sao lưu pg_dump tự động định kỳ, có kịch bản diễn tập restore định kỳ trong `docs/RUNBOOK.md`. |
+
+### 5.2. Các yêu cầu an toàn thông tin & giới hạn tài nguyên
+
+- **NFR-SEC-01 (Mật khẩu tài khoản):** Băm bằng Argon2id theo chuẩn RFC 9106 (`memory_cost = 65,536 KiB (64 MB)`, `time_cost = 3`, `parallelism = 4`). Tuyệt đối không lưu mật khẩu thô hoặc dùng thuật toán yếu (MD5, SHA-1, SHA-256 không salt).
+- **NFR-SEC-02 (Lưu trữ Refresh Token):** Database chỉ lưu bản băm mật mã SHA-256 (chuỗi 64 ký tự hex) của refresh token.
+- **NFR-SEC-03 (Chống Brute-force Đăng nhập):** Tự động khóa tạm thời **900 giây (15 phút)** nếu đăng nhập sai **$\ge 5$ lần liên tiếp** trên cùng cặp định danh `(email, IP)`.
+- **NFR-SEC-04 (Chống Brute-force Dò mã PIN phòng):** Áp dụng 2 lớp phòng thủ: Nginx giới hạn tốc độ 5 req/s cho `/api/v1/games/join`, kết hợp ứng dụng đếm lỗi theo IP trong Redis (sai **$\ge 10$ lần trong 10 phút** $\rightarrow$ tạm khóa IP **15 phút**). Giảm xác suất tấn công dò trúng PIN từ 8–9 lần/ngày xuống **$< 0.03$ lần/ngày**.
+- **NFR-SEC-05 (Giới hạn tốc độ thông điệp WebSocket):** Giới hạn tối đa **5 thông điệp/giây** cho mỗi kết nối WebSocket. Nếu client spam liên tục vượt ngưỡng $\ge 100$ msg/s, hệ thống lập tức ngắt kết nối WebSocket với mã lỗi bảo mật.
+- **NFR-PERF-02 (Thời gian sống ws-ticket):** Vé WebSocket một lần chỉ có hiệu lực tối đa **30 giây** trong Redis, bị vô hiệu hóa tức thì bằng lệnh nguyên tử `GETDEL` ngay khi bắt đầu bắt tay WebSocket.
+- **NFR-RES-01 (Giới hạn bộ nhớ Redis):** Redis cấu hình cứng `maxmemory 128mb` với chính sách `maxmemory-policy noeviction`. Toàn bộ dữ liệu tạm thời bắt buộc phải có TTL xác định, Stream câu trả lời phải được `XTRIM` hoặc đặt `EXPIRE` sau trận để bảo đảm mức tiêu thụ bộ nhớ luôn **$< 64\text{ MB}$ (dưới 50% trần bộ nhớ)**.
 
 ---
 
