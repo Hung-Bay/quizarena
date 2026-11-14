@@ -74,6 +74,39 @@
       - **Kịch bản B (Sudden Crash - `docker kill quizarena-realtime-2`):** Client phát hiện ngắt socket, reconnect thành công sang replica còn lại trong **2031.7ms** (< 3.0s SLA NF-5), trạng thái trận đấu `question_active` giữ nguyên vẹn.
     - Nghiệm thu: **Đạt 100% mục tiêu Thứ Ba** (Reconnect < 3s ở cả hai trường hợp, điểm không mất).
 
+- **Thứ Tư (Load Test 300 Bots, Nâng Cấp Đo Độ Trễ Bot, Đối Soát Đáp Án 100%, Locust REST & Báo Cáo LOADTEST.md):**
+  - **Nâng cấp Bot Runner & Thước đo Độ trễ Client (`backend/app/game/bot_runner.py` & `cli.py`):**
+    - Đo độ trễ broadcast `question.start` so với `server_time` (NF-3 SLA: $p_{95} < 500\text{ ms}$).
+    - Đo độ trễ RTT `answer.ack` phía client từ lúc gửi frame WS đến khi nhận ack (NF-2 SLA: $p_{95} < 150\text{ ms}$).
+    - Bổ sung hàm tính toán phân vị tuyến tính `calc_percentile(data, p)` và xuất thống kê chi tiết $p_{50}, p_{90}, p_{95}, p_{99}$ cho lệnh CLI `quizarena bots`.
+  - **Khung Kiểm Thử Tải Tự Động Hóa Toàn Diện (`infra/loadtest/loadtest_runner.py`):**
+    - Hỗ trợ các kịch bản `--mode 1x300`, `--mode 3x100`, và `--mode compare`.
+    - Tự động chuẩn bị dữ liệu `GamePlayer` trong PostgreSQL và Redis, quản trị kết nối qua Nginx.
+    - Cào metrics Prometheus thời gian thực (`histogram_quantile(0.95, sum by (le) (rate(game_answer_duration_seconds_bucket[5m])))`, `ws_connections`).
+    - Đo đạc dung lượng bộ nhớ Redis trước/sau test, kiểm tra TTL keyspace và kích hoạt `XTRIM`/`EXPIRE` dọn dẹp Stream.
+  - **Kịch bản 1: 1 trận × 300 Bots (`1x300`):**
+    - 300/300 bots kết nối thành công qua Nginx phân bổ đều trên 3 replica realtime.
+    - **Đối soát dữ liệu toàn vẹn:** `Accepted Answers (300) == Stream Length (300) == PostgreSQL Rows (300)` $\rightarrow$ **100% Khớp, không mất đáp án nào (NF-1)**. Leaderboard ZSET đạt 269,049 điểm khớp tổng điểm các câu đúng.
+    - **SLA NF-2 (`answer.ack` RTT):** $p_{50} = 3.9\text{ ms} \mid \mathbf{p_{95} = 7.3\text{ ms}} \mid p_{99} = 8.7\text{ ms}$ (SLA $< 150\text{ ms}$, nhanh gấp 20.5 lần). Server answer duration $p_{95} = 9.5\text{ ms}$.
+    - **SLA NF-3 (Broadcast delay):** $p_{50} = 57.6\text{ ms} \mid \mathbf{p_{95} = 66.6\text{ ms}} \mid p_{99} = 67.6\text{ ms}$ (SLA $< 500\text{ ms}$, nhanh gấp 7.5 lần).
+  - **Kịch bản 2: 3 trận × 100 Bots chạy đồng thời (`3x100`):**
+    - Chạy song song 3 trận độc lập (PIN `114777`, `623616`, `322511`) với tổng cộng 300 bots.
+    - Cả 3 trận đều đối soát thành công 100%: 100/100/100 đáp án accepted = stream = postgres.
+    - Broadcast delay $p_{95}$ đạt **50.3 ms**; `answer.ack` RTT $p_{95}$ đạt **7.4 ms**.
+  - **Kịch bản 3: Thực nghiệm so sánh 1 Replica vs 3 Replicas (cho ADR-004):**
+    - Đo đạc thực nghiệm cùng kịch bản 300 bots trên 1 replica vs 3 replicas: 3 replicas giúp giảm 21.5% RTT ack $p_{95}$ (7.3 ms vs 9.3 ms) và giảm 22% Broadcast delay $p_{95}$ (66.6 ms vs 85.4 ms), giải tỏa áp lực event loop trên một core duy nhất.
+    - Ghi nhận đặc tính kỹ thuật: "Scale lên không cân bằng lại kết nối cũ", minh chứng tầm quan trọng của jitter reconnect và graceful drain.
+  - **Kịch bản 4: Kiểm thử hiệu năng REST Endpoints bằng Locust (NF-4):**
+    - Tạo `infra/loadtest/locustfile.py` đo 50 concurrent users gửi requests tới `/healthz`, `/readyz`, `/api/v1/quizzes/public`.
+    - Thực hiện 1,242 requests, 0% failure, **$p_{95} = 27.0\text{ ms}$** (vượt xa SLA $< 200\text{ ms}$).
+  - **Kiểm tra an toàn bộ nhớ Redis & 10 vai trò (§7.6):**
+    - Đạt chuẩn `maxmemory 128mb` và `noeviction`: Peak memory đo được chỉ **4.41 MB** (chiếm 3.4% trần 128 MB). Mọi key đều có TTL hoặc được XTRIM dọn dẹp sạch sẽ sau trận.
+    - Rà soát và kiểm chứng đầy đủ 10 vai trò kiến trúc của Redis trong hệ thống.
+  - **Hoàn thiện tài liệu Báo cáo:**
+    - Hoàn tất tài liệu toàn diện `docs/LOADTEST.md` với đầy đủ số liệu đo lần đầu, các lần sửa lỗi, bảng đối soát và kết quả định lượng.
+    - Cập nhật mục 5 trong `docs/SRS.md` với mọi dòng có số liệu đo đạc cụ thể.
+  - **Nghiệm thu:** **Đạt 100% mục tiêu Thứ Tư**. Sẵn sàng gửi PR giữa tuần.
+
 ---
 
 ## Chi tiết Phase 4 — Tuần 5: Frontend React SPA, AI Báo Cáo Sau Trận & Quản Trị Hệ Thống

@@ -1,0 +1,117 @@
+{
+  "mode": "3x100",
+  "timestamp": "2026-11-14T15:40:22.574397+00:00",
+  "total_bots": 300,
+  "total_submitted": 300,
+  "total_accepted": 300,
+  "total_stream": 300,
+  "total_postgres": 300,
+  "reconciliation_passed": true,
+  "metrics": {
+    "ack_rtt_p50": 3.7,
+    "ack_rtt_p90": 6.4,
+    "ack_rtt_p95": 7.4,
+    "ack_rtt_p99": 8.7,
+    "broadcast_p50": 21.5,
+    "broadcast_p90": 48.3,
+    "broadcast_p95": 50.3,
+    "broadcast_p99": 51.3
+  },
+  "redis_memory": {
+    "before_mb": 2.8,
+    "after_mb": 4.0,
+    "peak_mb": 4.41
+  },
+  "matches": [
+    {
+      "game_id": "ed0084fc-f878-4db7-9cef-6d3a4ee80a83",
+      "bot_count": 100,
+      "connected_bots": 100,
+      "submitted_answers": 100,
+      "accepted_answers": 100,
+      "rejected_answers": 0,
+      "stream_length": 100,
+      "postgres_answers_count": 100,
+      "leaderboard_total_score": 83905,
+      "reconciliation_passed": true,
+      "broadcast_delay_ms": {
+        "count": 100,
+        "min": 4.9,
+        "p50": 19.6,
+        "p90": 23.6,
+        "p95": 24.5,
+        "p99": 24.5,
+        "max": 24.5
+      },
+      "ack_rtt_ms": {
+        "count": 100,
+        "min": 1.8,
+        "p50": 3.6,
+        "p90": 6.1,
+        "p95": 6.8,
+        "p99": 8.5,
+        "max": 8.8
+      }
+    },
+    {
+      "game_id": "e4194411-2a18-4b0e-b2ec-0f4f19f61c64",
+      "bot_count": 100,
+      "connected_bots": 100,
+      "submitted_answers": 100,
+      "accepted_answers": 100,
+      "rejected_answers": 0,
+      "stream_length": 100,
+      "postgres_answers_count": 100,
+      "leaderboard_total_score": 85817,
+      "reconciliation_passed": true,
+      "broadcast_delay_ms": {
+        "count": 100,
+        "min": 19.8,
+        "p50": 46.8,
+        "p90": 51.3,
+        "p95": 51.3,
+        "p99": 51.3,
+        "max": 51.3
+      },
+      "ack_rtt_ms": {
+        "count": 100,
+        "min": 2.3,
+        "p50": 3.8,
+        "p90": 6.8,
+        "p95": 8.1,
+        "p99": 23.3,
+        "max": 28.0
+      }
+    },
+    {
+      "game_id": "f488a8a7-8a9b-4807-999a-e6166b419fad",
+      "bot_count": 100,
+      "connected_bots": 100,
+      "submitted_answers": 100,
+      "accepted_answers": 100,
+      "rejected_answers": 0,
+      "stream_length": 100,
+      "postgres_answers_count": 100,
+      "leaderboard_total_score": 89801,
+      "reconciliation_passed": true,
+      "broadcast_delay_ms": {
+        "count": 100,
+        "min": 5.3,
+        "p50": 18.3,
+        "p90": 46.3,
+        "p95": 46.3,
+        "p99": 47.3,
+        "max": 48.3
+      },
+      "ack_rtt_ms": {
+        "count": 100,
+        "min": 1.9,
+        "p50": 3.8,
+        "p90": 6.1,
+        "p95": 7.0,
+        "p99": 8.3,
+        "max": 8.6
+      }
+    }
+  ]
+}

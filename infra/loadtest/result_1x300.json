@@ -1,0 +1,57 @@
+{
+  "mode": "1x300",
+  "timestamp": "2026-11-14T15:39:41.864527+00:00",
+  "total_bots": 300,
+  "total_submitted": 300,
+  "total_accepted": 300,
+  "total_stream": 300,
+  "total_postgres": 300,
+  "reconciliation_passed": true,
+  "metrics": {
+    "ack_rtt_p50": 3.9,
+    "ack_rtt_p90": 6.3,
+    "ack_rtt_p95": 7.3,
+    "ack_rtt_p99": 8.7,
+    "broadcast_p50": 57.6,
+    "broadcast_p90": 66.6,
+    "broadcast_p95": 66.6,
+    "broadcast_p99": 67.6
+  },
+  "redis_memory": {
+    "before_mb": 2.42,
+    "after_mb": 3.61,
+    "peak_mb": 4.14
+  },
+  "matches": [
+    {
+      "game_id": "10b4c10d-d4d7-4842-ac4e-4ad562ed7e7f",
+      "bot_count": 300,
+      "connected_bots": 300,
+      "submitted_answers": 300,
+      "accepted_answers": 300,
+      "rejected_answers": 0,
+      "stream_length": 300,
+      "postgres_answers_count": 300,
+      "leaderboard_total_score": 269049,
+      "reconciliation_passed": true,
+      "broadcast_delay_ms": {
+        "count": 300,
+        "min": 14.6,
+        "p50": 57.6,
+        "p90": 66.6,
+        "p95": 66.6,
+        "p99": 67.6,
+        "max": 67.6
+      },
+      "ack_rtt_ms": {
+        "count": 300,
+        "min": 1.9,
+        "p50": 3.9,
+        "p90": 6.3,
+        "p95": 7.3,
+        "p99": 8.7,
+        "max": 10.1
+      }
+    }
+  ]
+}

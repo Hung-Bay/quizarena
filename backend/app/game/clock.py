@@ -62,10 +62,15 @@ async def build_question_result_payload(
             await redis.hget(f"game:{game_id}:streaks", pid_str)  # type: ignore[misc]
             or 0
         )
+        try:
+            pid_uuid = uuid.UUID(pid_str)
+        except ValueError:
+            pid_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, pid_str)
+
         leaderboard.append(
             LeaderboardEntry(
                 rank=rank_idx,
-                player_id=uuid.UUID(pid_str),
+                player_id=pid_uuid,
                 nickname=nick,
                 score=int(score_val),
                 streak=int(streak_val),

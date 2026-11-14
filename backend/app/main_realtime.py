@@ -49,7 +49,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if not getattr(app.state, "is_draining", False):
             app.state.is_draining = True
             log.warning("Nhận tín hiệu SIGTERM -> Kích hoạt Graceful Drain cho Realtime service")
-            asyncio.create_task(app.state.manager.drain_and_close_all())
+
+            async def _drain_and_stop() -> None:
+                await app.state.manager.drain_and_close_all()
+                # Cho phép uvicorn dừng vòng lặp sự kiện
+                loop.stop()
+
+            asyncio.create_task(_drain_and_stop())
 
     sig_installed = False
     # Signal handlers chỉ được cài đặt từ main thread của main interpreter (tránh lỗi khi chạy TestClient trong worker thread)

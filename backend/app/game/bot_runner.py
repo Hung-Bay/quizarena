@@ -42,15 +42,80 @@ class BotConfig:
 
 @dataclass
 class BotStats:
-    """Thống kê hoạt động của bầy bot."""
+    """Thống kê hoạt động của bầy bot và các chỉ số đo lường hiệu năng (NF-1, NF-2, NF-3, NF-5)."""
 
     total_bots: int = 0
     joined: int = 0
     connected: int = 0
     answers_submitted: int = 0
     answers_accepted: int = 0
+    answers_rejected: int = 0
     completed: int = 0
     errors: list[str] = field(default_factory=list)
+
+    # Đo độ trễ broadcast question.start (NF-3 SLA: p95 < 500 ms)
+    broadcast_delays_ms: list[float] = field(default_factory=list)
+
+    # Đo RTT answer.ack từ góc nhìn client (NF-2)
+    answer_rtts_ms: list[float] = field(default_factory=list)
+
+    # Đo thời gian reconnect (NF-5 SLA: < 3.0s)
+    reconnect_times_s: list[float] = field(default_factory=list)
+
+    @staticmethod
+    def calc_percentile(data: list[float], p: float) -> float:
+        """Tính phân vị p (0-100) bằng nội suy tuyến tính."""
+        if not data:
+            return 0.0
+        s = sorted(data)
+        k = (len(s) - 1) * (p / 100.0)
+        f = int(k)
+        c = f + 1
+        if c < len(s):
+            return s[f] + (k - f) * (s[c] - s[f])
+        return s[f]
+
+    def summary(self) -> dict[str, Any]:
+        """Tổng hợp toàn bộ chỉ số đo lường hiệu năng."""
+        return {
+            "total_bots": self.total_bots,
+            "joined": self.joined,
+            "connected": self.connected,
+            "answers_submitted": self.answers_submitted,
+            "answers_accepted": self.answers_accepted,
+            "answers_rejected": self.answers_rejected,
+            "completed": self.completed,
+            "error_count": len(self.errors),
+            "broadcast_delay_ms": {
+                "count": len(self.broadcast_delays_ms),
+                "min": min(self.broadcast_delays_ms) if self.broadcast_delays_ms else 0.0,
+                "avg": sum(self.broadcast_delays_ms) / len(self.broadcast_delays_ms)
+                if self.broadcast_delays_ms
+                else 0.0,
+                "p50": self.calc_percentile(self.broadcast_delays_ms, 50),
+                "p90": self.calc_percentile(self.broadcast_delays_ms, 90),
+                "p95": self.calc_percentile(self.broadcast_delays_ms, 95),
+                "p99": self.calc_percentile(self.broadcast_delays_ms, 99),
+                "max": max(self.broadcast_delays_ms) if self.broadcast_delays_ms else 0.0,
+            },
+            "answer_rtt_ms": {
+                "count": len(self.answer_rtts_ms),
+                "min": min(self.answer_rtts_ms) if self.answer_rtts_ms else 0.0,
+                "avg": sum(self.answer_rtts_ms) / len(self.answer_rtts_ms)
+                if self.answer_rtts_ms
+                else 0.0,
+                "p50": self.calc_percentile(self.answer_rtts_ms, 50),
+                "p90": self.calc_percentile(self.answer_rtts_ms, 90),
+                "p95": self.calc_percentile(self.answer_rtts_ms, 95),
+                "p99": self.calc_percentile(self.answer_rtts_ms, 99),
+                "max": max(self.answer_rtts_ms) if self.answer_rtts_ms else 0.0,
+            },
+            "reconnect_time_s": {
+                "count": len(self.reconnect_times_s),
+                "p95": self.calc_percentile(self.reconnect_times_s, 95),
+                "max": max(self.reconnect_times_s) if self.reconnect_times_s else 0.0,
+            },
+        }
 
 
 class SingleBot:
@@ -71,6 +136,7 @@ class SingleBot:
         self.is_running: bool = False
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._answered_questions: set[int] = set()
+        self._submit_t0: dict[int, float] = {}
 
     async def run(self, http_client: httpx.AsyncClient) -> None:
         """Thực thi toàn bộ vòng đời của một bot."""
@@ -187,11 +253,32 @@ class SingleBot:
         data = envelope.get("data") or {}
 
         if msg_type == "question.start":
+            # Đo NF-3: thời gian từ lúc server phát đến lúc client nhận (server_time epoch ms)
+            server_time = data.get("server_time")
+            if server_time is not None:
+                now_ms = time.time() * 1000.0
+                delay_ms = max(0.0, now_ms - float(server_time))
+                self.stats.broadcast_delays_ms.append(delay_ms)
             await self._handle_question_start(data)
 
         elif msg_type == "answer.ack":
+            # Đo NF-2: Round-Trip Time từ lúc nộp đến lúc nhận ack
+            q_idx = data.get("q_index")
+            t0 = self._submit_t0.pop(q_idx, None) if q_idx is not None else None
+            if t0 is not None:
+                rtt_ms = (time.perf_counter() - t0) * 1000.0
+                self.stats.answer_rtts_ms.append(rtt_ms)
+
             if data.get("accepted"):
                 self.stats.answers_accepted += 1
+            else:
+                self.stats.answers_rejected += 1
+
+        elif msg_type == "server.draining":
+            log.info("Bot %s nhận tín hiệu server.draining", self.nickname)
+            # Tự động đóng để chuẩn bị reconnect (nếu có logic reconnect)
+            retry_after = data.get("retry_after_ms", 300) / 1000.0
+            await asyncio.sleep(retry_after)
 
         elif msg_type == "game.finished":
             log.info("Bot %s nhận tín hiệu trận đấu kết thúc", self.nickname)
@@ -240,6 +327,7 @@ class SingleBot:
             },
         }
 
+        self._submit_t0[q_index] = time.perf_counter()
         await self.ws.send(json.dumps(submit_envelope))
         self.stats.answers_submitted += 1
         log.debug("Bot %s đã nộp câu %s (option %s)", self.nickname, q_index, chosen_id)
