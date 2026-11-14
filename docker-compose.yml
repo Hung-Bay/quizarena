@@ -144,14 +144,53 @@ services:
           memory: 64M
     logging: *default-logging
 
+  # ------------------------------------------------------------- Giám sát (Profile: monitoring)
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    profiles: [monitoring]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [app, monitoring]
+    logging: *default-logging
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: unless-stopped
+    profiles: [monitoring]
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks: [app, monitoring]
+    logging: *default-logging
+
 networks:
   edge: {}                    # chỉ nginx
   app: {}                     # nginx ↔ api / realtime / worker
   data:
     internal: true            # postgres, redis: không có đường ra Internet
-  # monitoring: {}            # thêm ở Phase 5–6 (Prometheus, Grafana, Loki…)
+  monitoring: {}              # Prometheus, Grafana, Loki (Phase 5–7)
 
 volumes:
   pgdata:
   redisdata:
   uploads:
+  promdata:
+  grafanadata:

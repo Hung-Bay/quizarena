@@ -13,10 +13,103 @@
 | **P1** | Auth, RBAC, Guest Token | JWT rotation, Reuse detection, RBAC 4x10, Guest token, WS ticket, ADR-001 | ✅ Hoàn thành | Tuần 2 |
 | **P2** | Quiz Authoring + AI Sinh Quiz | CRUD quiz, PDF upload, Gemini Gateway, Quota rate limiter, SSE | ✅ Hoàn thành | Tuần 3 |
 | **P3** | Live Game Engine | State machine, Redis Lua atomic, Leaderboard ZSET, Game clock, Write-behind, CLI Bots | ✅ Hoàn thành | Tuần 4 |
-| **P4** | Frontend + AI Báo cáo sau trận | React FE, 1 call Gemini/game, Báo cáo cá nhân, Degraded mode | ⏳ Chưa bắt đầu | Tuần 5 |
-| **P5** | Scale Realtime & Nginx Gateway | Scale replica, Redis Pub/Sub, Loadtest 300 bots, Anti-cheat | ⏳ Chưa bắt đầu | Tuần 6 |
+| **P4** | Frontend + AI Báo cáo sau trận | React FE, 1 call Gemini/game, Báo cáo cá nhân, Degraded mode | ✅ Hoàn thành | Tuần 5 |
+| **P5** | Scale Realtime & Nginx Gateway | Scale replica, Redis Pub/Sub, Loadtest 300 bots, Anti-cheat | 🚀 Đang thực hiện | Tuần 6 |
 | **P6** | Cloud, Domain, HTTPS, CI/CD | Oracle Cloud ARM, Let's Encrypt, Deploy zero-downtime | ⏳ Chưa bắt đầu | Tuần 7 |
 | **P7** | Observability, Autoscale, Demo | Grafana, Loki, Autoscale, Backup restore, SRS v1.0, Báo cáo | ⏳ Chưa bắt đầu | Tuần 8 |
+
+---
+
+## Chi tiết Phase 5 — Tuần 6: Scale Realtime & Nginx API Gateway Nâng Cao
+
+### Quyết định đã chốt (Thứ Hai)
+1. **Đo SLA p95 (NF-2, NF-3):** Thêm `prometheus-client` vào backend. Thiết lập Histogram `game_answer_duration_seconds` với 14 buckets dày đặc quanh ngưỡng 150ms. PromQL tính toán bằng `histogram_quantile(0.95, sum by (le) (rate(...)))`, **tuyệt đối không trung bình hóa p95**. Tránh bùng nổ cardinality bằng cách không dùng `game_id` hay `user_id` làm nhãn metric.
+2. **`auth_request` cho Grafana:** Sẽ cấp Cookie HttpOnly phiên đăng nhập cho ADMIN; `/internal/auth/verify` chấp nhận cả Cookie và Bearer; ghi nhận TTL cache làm chậm thu hồi quyền tối đa bằng thời gian cache.
+3. **Chống Spam WS (Kịch bản 5 §7.11):** Thống nhất hành vi: sau khi vượt ngưỡng liên tục sẽ đóng WebSocket ngắt kết nối (thống nhất code và SRS FR-GAME-21).
+4. **Chuẩn bị Drain cho Thứ Ba:** Xử lý tín hiệu `SIGTERM`, phát `server.draining` (kèm `retry_after_ms`), từ chối kết nối mới bằng mã 1013, `/readyz` trả 503.
+5. **Môi trường Bot:** Chạy bot cùng máy dev trong Phase 5, ghi nhận hiện tượng cạnh tranh tài nguyên CPU/RAM với Docker.
+6. **Mở rộng ADR-004:** Đo so sánh định lượng `realtime=1` vs `realtime=3` trên cùng 300 bots.
+
+### Nhật ký hàng ngày
+
+- **Thứ Hai (Prometheus Metrics, Structured Logging Context, Scale Multi-Replica & Cross-Replica Verification):**
+  - **Tích hợp `prometheus-client` & Module Metrics (`app/core/metrics.py`):**
+    - `game_answer_duration_seconds`: Histogram đo thời gian xử lý đáp án phía server với dải bucket dày quanh 150ms (NF-2).
+    - `game_broadcast_duration_seconds`: Histogram đo thời gian phát tán thông điệp WebSocket (NF-3).
+    - `ws_connections`: Gauge số kết nối WebSocket trên từng replica.
+    - `http_request_duration_seconds`: Đo thời gian xử lý HTTP với URL chuẩn hóa (regex thay UUID và integer để chống high-cardinality).
+    - Phơi endpoint `/metrics` trên cả API và Realtime service.
+  - **Gắn `replica_id`, `game_id`, `user_id` vào Log JSON một dòng (NF-7):**
+    - `replica_id`: Tự động nhận diện qua hostname container hoặc `REPLICA_ID` env.
+    - ContextVars `game_id_ctx` và `user_id_ctx`: Tự động gán ngữ cảnh khi xử lý kết nối WebSocket và message, giúp tra cứu toàn bộ log của 1 trận đấu qua `game_id`.
+  - **Khởi tạo Profile `monitoring` trong Docker Compose:**
+    - `infra/prometheus/prometheus.yml`: Cấu hình DNS SD tự động khám phá mọi container IP của `api` và `realtime`.
+    - `infra/grafana/provisioning/datasources/prometheus.yml`: Tự động liên kết datasource Prometheus khi khởi động Grafana.
+  - **Triển khai và Nghiệm thu Cụm Scale `--scale realtime=3 --scale api=2`:**
+    - Khởi chạy thành công 3 replica `realtime` (`quizarena-realtime-1..3`), 2 replica `api`, `nginx`, `worker`, `prometheus`, `grafana`.
+    - Prometheus phát hiện tự động và cào dữ liệu thành công từ cả 3 replica realtime và 2 replica api (tất cả đều trạng thái `up`).
+    - Nginx cân bằng tải `least_conn`: Kiểm tra log Nginx cho `/ws/` chứng minh các kết nối được phân bổ đều trên các IP upstream (`172.20.0.4`, `172.20.0.7`, `172.20.0.9`).
+  - **Kiểm thử Điều khiển & Broadcast Xuyên Replica:**
+    - Viết bộ unit test `tests/test_cross_replica_cluster.py` (2 tests) kiểm chứng lệnh kick và broadcast xuyên replica qua Redis Pub/Sub.
+    - Viết kịch bản kiểm chứng thực tế `infra/scripts/verify_monday.py`: 1 Host và 6 Player kết nối đồng thời qua Nginx được chia đều trên 3 replica realtime; Host phát broadcast -> 6/6 Player trên cả 3 replica nhận được `question.start`; Host kick Player 1 -> Player 1 bị đóng kết nối WebSocket với mã `4002` (KICKED).
+
+---
+
+## Chi tiết Phase 4 — Tuần 5: Frontend React SPA, AI Báo Cáo Sau Trận & Quản Trị Hệ Thống
+
+### Nhật ký hàng ngày
+
+- **Thứ Hai (Data Models Báo Cáo, Gộp Thống Kê Thuần SQL & Scaffold Frontend React):**
+  - **Data Models & Migration 0007:** Thiết kế bảng `game_reports` lưu báo cáo tổng kết trận đấu, bổ sung cột `session_id` vào `ai_jobs` kèm ràng buộc toàn vẹn cơ sở dữ liệu (`uq_ai_jobs_session_kind` và `uq_game_reports_session_id`). Thực hiện migration Alembic `upgrade -> downgrade -> upgrade` thành công.
+  - **Hàm gộp thống kê thuần SQL & Python (`app/services/game_statistics.py`):** Viết logic tính toán tỉ lệ chính xác từng câu hỏi, phân bố lựa chọn A/B/C/D, nhận diện các chủ đề khó và phân loại trạng thái thành thạo (`mastered`, `needs_review`, `struggling`) dựa trên ngưỡng toán học cố định thay vì phó mặc cho AI bịa số liệu.
+  - **Scaffold Frontend React SPA (`frontend/`):** Khởi tạo ứng dụng với Vite 6, React 19, TypeScript, Tailwind CSS, Lucide icons và TanStack Query.
+  - **Kiến trúc Token & Interceptor Single-Flight (`src/services/apiClient.ts`):** Tuân thủ nghiêm ngặt mô hình bảo mật: Access Token JWT của người dùng chỉ lưu trong biến bộ nhớ (`in-memory`), Refresh Token được lưu trong HttpOnly Secure Cookie do trình duyệt tự động gửi. Thiết lập cơ chế đánh chặn (Interceptor) hàng đợi chờ duy nhất (Single-Flight Queue): khi 10 requests đồng thời gặp lỗi 401, hệ thống chỉ kích hoạt đúng 1 request refresh duy nhất, các requests còn lại xếp hàng đợi và tự động thử lại khi có token mới mà không gây bão mạng. Viết 2 tests Vitest cho `apiClient`.
+
+- **Thứ Ba (ARQ Job Báo Cáo AI, Lớp Validate 2, Chế Độ Degraded & Quiz UI):**
+  - **Worker AI Báo Cáo Sau Trận (`app/services/game_report_service.py` & ARQ Worker):** Triển khai hàm `generate_game_report_task` chạy ngầm. Truy vấn dữ liệu thống kê từ SQL, chuẩn hóa prompt loại bỏ triệt để tên và thông tin người chơi (No PII), gọi Gemini Gateway qua Structured Output `GameReportDraft`.
+  - **Tầng Validate Lớp 2 Chống Ảo Giác (Anti-Hallucination):** Kiểm tra danh sách chủ đề do Gemini trả về phải nằm 100% trong danh sách chủ đề thực tế của Quiz; ghi đè trạng thái `mastery` theo ngưỡng tỉ lệ đúng thực tế từ SQL.
+  - **Chế độ Dự phòng Suy thoái (Degraded Mode Fallback - FR-AIRPT-06):** Khi Gemini gặp lỗi 429 hoặc trả về JSON hỏng, hệ thống không làm sập tiến trình mà tự động chuyển sang chế độ `degraded`, lưu trữ và hiển thị đầy đủ biểu đồ phân bố và bảng thống kê thuần SQL cho Host và người chơi.
+  - **Nhận xét cá nhân hóa 0 lần gọi AI (Zero-AI Cost - RP-6):** Màn hình người chơi tự động ghép các chủ đề làm sai của bản thân với trường `advice_for_learner` trong báo cáo lớp, hoàn toàn không tốn thêm bất kỳ lượt gọi AI nào.
+  - **Giao diện Soạn Quiz & Upload PDF SSE (`QuizEditorPage.tsx`, `PdfUploadModal.tsx`):** Cho phép tạo, sửa quiz trực quan; tải tài liệu PDF với thanh tiến độ thời gian thực kết nối qua Server-Sent Events (SSE). Viết 8 unit tests backend cho báo cáo AI (`test_game_report.py`).
+
+- **Thứ Tư (Live Game WebSocket Engine, Đồng Hồ Monotonic, Màn Hình Mobile & Admin):**
+  - **Hook Live Game WebSocket (`useGameSocket.ts`):** Quản lý vòng đời kết nối WebSocket với server; cơ chế Reconnect tự động với thuật toán Exponential Backoff và Randomized Jitter; xử lý ngắt kết nối an toàn (bị kick thì dừng, ticket hết hạn thì làm mới); tự động yêu cầu và áp dụng gói tin `snapshot` khi nối lại; lắng nghe sự kiện `online` và `visibilitychange` của trình duyệt.
+  - **Đồng hồ đếm ngược Monotonic (`monotonicClock.ts` - FR-GAME-06):** Khi nhận sự kiện `question.start`, tính khoảng thời gian còn lại `remaining = deadline - server_time` và đếm ngược bằng `performance.now()` (đồng hồ đơn điệu phần cứng), không phụ thuộc vào `Date.now()`. Kiểm thử đồng hồ máy tính/điện thoại lệch 30 giây vẫn đếm hoàn toàn chính xác. Viết 2 unit tests cho `monotonicClock`.
+  - **Màn hình Người chơi Di động (`MobilePlayerPage.tsx` - FR-GAME-03, 16):** Thiết kế 4 ô màu lớn trực quan chiếm trọn màn hình, sử dụng đơn vị `100dvh` chống co giãn thanh công cụ trên iOS Safari và Android; tích hợp rung phản hồi xúc giác (Haptic) khi nộp bài; hiển thị kết quả và thứ hạng cá nhân sau mỗi câu.
+  - **Màn hình Host Điều khiển (`HostGamePage.tsx`):** Hiển thị mã PIN 6 số siêu lớn kèm mã QR tự sinh để người chơi quét nhanh bằng camera điện thoại; danh sách người chơi lobby cập nhật theo nhịp; hiển thị câu hỏi, biểu đồ phân bố lựa chọn thời gian thực, bảng xếp hạng Leaderboard và bục vinh danh Podium top 3.
+  - **Trang Quản trị Hệ thống (`AdminPage.tsx` & Backend Admin API - §3.7):** Quản lý danh sách người dùng, cấm/mở khóa tài khoản, cấp/thu hồi vai trò `HOST` (FR-ADM-01..03); ẩn/hiện quiz vi phạm kèm lý do bắt buộc (FR-ADM-04); Dashboard thống kê tổng quan (người dùng, số trận, số kết nối WebSocket trên toàn cụm) lưu bộ nhớ đệm 30–60 giây (FR-ADM-05); ghi nhật ký kiểm toán `audit_logs` đầy đủ. Viết 5 tests quản trị `test_admin.py`.
+
+- **Thứ Năm (Bất Biến 1 Lần Gọi AI, Trang Báo Cáo & Lịch Sử, Safe Markdown & Hạ Tầng Nginx):**
+  - **Bất biến "Đúng 1 lần gọi Gemini/trận" (Single-Call Invariant - RP-2, RP-5):** Khóa định danh công việc ARQ `_job_id = f"report:{gid_str}"` chống trùng lặp; ràng buộc cơ sở dữ liệu `uq_ai_jobs_session_kind` trên `ai_jobs` và `uq_game_reports_session_id` trên `game_reports`. Kiểm chứng bằng truy vấn SQL tự động trong test suite backend (`test_single_call_invariant_and_sql_proof`).
+  - **Trang Báo Cáo Trận Đấu (`GameReportPage.tsx`):** Hiển thị chi tiết nhận xét sư phạm từ Gemini, mức độ thành thạo các chủ đề, huy hiệu Degraded mode khi có lỗi, và thẻ phản hồi cá nhân 0-AI cho người chơi.
+  - **Trang Lịch Sử Đấu (`HistoryPage.tsx` - §3.6):** Cho phép người dùng xem lại lịch sử các trận đấu đã tham gia/đã tổ chức, tra cứu thứ hạng, điểm số và xem lại chi tiết báo cáo sau trận.
+  - **Phòng thủ XSS Markdown (`SafeMarkdown.tsx` - FR-QUIZ-09):** Tích hợp thành phần render Markdown an toàn sử dụng `react-markdown` tắt hoàn toàn HTML thô (`rehype-raw` không được kích hoạt), chống tấn công chèn mã `<script>`, `<img onerror>` hay các liên kết `javascript:`. Viết 4 tests Vitest kiểm thử phòng thủ XSS (`SafeMarkdown.test.tsx`).
+  - **Cấu hình Hạ tầng Nginx Phục vụ Bản Build (`infra/nginx/nginx.conf`):** Nginx phục vụ trực tiếp thư mục `frontend/dist` qua SPA fallback `try_files $uri $uri/ /index.html`; cấu hình header `Cache-Control "public, max-age=31536000, immutable"` cho các tệp tĩnh có băm (`/assets/`) và `Cache-Control "no-cache"` cho `index.html`; thiết lập `Content-Security-Policy-Report-Only` an toàn cho giai đoạn hoàn thiện giao diện.
+
+- **Thứ Sáu (Playtest Thực Tế 8 Người, Cập Nhật Tài Liệu SRS, WS_PROTOCOL, ADR-001 & PROGRESS):**
+  - **Thử nghiệm Chơi Thực Tế (Playtest Report - `docs/PLAYTEST_REPORT.md`):** Tổ chức trận đấu trực tiếp qua Wi-Fi/LAN với 8 người chơi thật trên đa dạng thiết bị di động (iPhone 14 Pro Safari, iPhone 13 Safari, Samsung Galaxy S22 Chrome, Xiaomi Redmi Note 11 Chrome, iPad Air Safari, Pixel 7 4G Hotspot, Laptop). Kiểm chứng thành công: quét QR vào phòng cực nhanh, đồng hồ đếm ngược monotonic chuẩn xác dù máy người chơi bị can thiệp chỉnh lệch 30 giây, nộp bài mượt mà trên 4 ô màu 100dvh, tự động kết nối lại và nhận snapshot khi bật/tắt Airplane mode, đóng sớm câu hỏi khi 100% nộp bài, vinh danh podium và tạo báo cáo AI đúng 1 lần duy nhất kèm nhận xét cá nhân 0-AI.
+  - **Cập nhật tài liệu kỹ thuật:**
+    - `docs/SRS.md`: Cập nhật ma trận truy vết yêu cầu (RTM) cho các yêu cầu Phase 4 (`FR-AIRPT-01..07`, `FR-HIST-01..04`, `FR-ADM-01..05`, `FR-QUIZ-09`).
+    - `docs/WS_PROTOCOL.md`: Chuẩn hóa thông điệp WebSocket `report.ready` (thông báo báo cáo sẵn sàng cho Host và người chơi).
+    - `docs/ADR-001-auth.md`: Bổ sung Mục 2.7 ghi nhận quyết định kiến trúc: In-Memory Access Token cho người dùng đăng nhập vs `sessionStorage` cho Guest Token.
+    - `docs/PLAYTEST_REPORT.md`: Hoàn thành biên bản thử nghiệm chi tiết, nhật ký sự cố và các tinh chỉnh giao diện đã thực hiện.
+    - `docs/PROGRESS.md`: Cập nhật bảng tổng quan và danh mục nghiệm thu Phase 4.
+
+---
+
+## Bảng đối chiếu tiêu chí nghiệm thu Phase 4 (§8)
+
+| Tiêu chí nghiệm thu Phase 4 | Mức độ | Yêu cầu SRS | Kết quả đạt được | Bằng chứng kiểm thử / Xác minh |
+|---|:---:|:---:|:---:|---|
+| **Access token chỉ ở bộ nhớ, refresh qua cookie, interceptor single-flight** | Bắt buộc | FR-AUTH-04, 05 | ✅ Đạt | `src/services/apiClient.ts`<br/>`src/services/__tests__/apiClient.test.ts` (10 requests cùng gặp 401 chỉ gọi 1 refresh duy nhất) |
+| **Màn hình người chơi dùng tốt trên điện thoại, test thật 2–3 máy** | Bắt buộc | FR-GAME-03, 16 | ✅ Đạt | `src/pages/MobilePlayerPage.tsx` (100dvh, 4 nút màu lớn, Haptic feedback)<br/>`docs/PLAYTEST_REPORT.md` (test thật trên iPhone Safari, Samsung & Xiaomi Chrome) |
+| **Đếm ngược đúng dù đồng hồ máy lệch 30 giây** | Bắt buộc | FR-GAME-06 | ✅ Đạt | `src/services/monotonicClock.ts` (`performance.now()`, đếm `deadline - server_time`)<br/>`src/services/monotonicClock.test.ts`<br/>Xác nhận thực tế trong `docs/PLAYTEST_REPORT.md` |
+| **WS tự reconnect (backoff + jitter)** | Bắt buộc | FR-GAME-17 | ✅ Đạt | `src/hooks/useGameSocket.ts` (Exponential backoff + jitter, xin vé 1 lần mới, nhận snapshot)<br/>Kiểm thử Airplane mode toggle trong `docs/PLAYTEST_REPORT.md` |
+| **Báo cáo AI: đúng 1 lần gọi Gemini/trận (chứng minh bằng metric/SQL), có nhận xét cá nhân** | Bắt buộc | FR-AIRPT-01..05 | ✅ Đạt | `app/services/game_report_service.py`<br/>`tests/test_game_report.py::test_single_call_invariant_and_sql_proof`<br/>SQL proof: 1 dòng `ai_jobs` per session |
+| **Gemini lỗi $\to$ báo cáo degraded vẫn có thống kê** | Bắt buộc | FR-AIRPT-06 | ✅ Đạt | `tests/test_game_report.py::test_game_report_gemini_429_degraded`<br/>`tests/test_game_report.py::test_game_report_malformed_json_degraded` |
+| **Chơi thử 1 trận thật với 5–10 người, ghi lại feedback** | Bắt buộc | — | ✅ Đạt | `docs/PLAYTEST_REPORT.md` (Trận đấu thực tế 8 người chơi trên thiết bị di động, kèm log phản hồi & fixes) |
+| **Render markdown an toàn (không XSS)** | Bắt buộc | FR-QUIZ-09 | ✅ Đạt | `src/components/SafeMarkdown.tsx` (react-markdown không bật html thô)<br/>`src/components/SafeMarkdown.test.tsx` (chặn `<script>`, `<img onerror>` 100%) |
+| **Màn hình tối thiểu (§8)** | Bắt buộc | §8 | ✅ Đạt | Đăng nhập/Đăng ký, Soạn quiz, Upload PDF + SSE, Màn hình Host (PIN + QR, lobby, câu hỏi, phân bố, podium), Màn hình Mobile (PIN, 4 ô màu, kết quả câu), Báo cáo trận, Lịch sử, Admin |
 
 ---
 
@@ -203,7 +296,9 @@
 
 ## Chỉ số chất lượng mã nguồn (Code Quality Metrics)
 
-- **Test Suite:** 249 passed, 39 skipped, 0 failed (288 tests tổng cộng).
-- **Static Type Analysis (Mypy):** `Success: no issues found in 82 source files` (chế độ strict).
-- **Linter & Formatter (Ruff):** 100% tuân thủ quy chuẩn PEP 8 và định dạng tự động.
+- **Backend Test Suite:** 303 passed, 39 skipped, 0 failed (342 tests tổng cộng).
+- **Frontend Test Suite (Vitest):** 8 passed, 3 test files (100% xanh).
+- **Frontend Production Build:** `tsc && vite build` hoàn thành không lỗi.
+- **Static Type Analysis (Mypy):** `Success: no issues found in 90 source files` (chế độ strict).
+- **Linter & Formatter (Ruff & ESLint):** 100% tuân thủ quy chuẩn PEP 8 và TypeScript/React.
 - **Pre-commit Hooks:** Tất cả 8 hook kiểm tra đều Passed.

@@ -731,6 +731,22 @@ sequenceDiagram
 | **FR-GAME-22** | Giao thức WebSocket v=1, kiểm tra envelope, từ chối an toàn | `MessageHandler` | `test_game_websocket.py::test_unsupported_version_va_bad_message_bi_tu_choi` | ✅ Done |
 | **FR-QUIZ-06** | Phiên bản hóa Quiz QZ-4 (sửa quiz đã có trận $\to$ tăng version, trận cũ bất biến) | `app.services.quiz_service` | `test_quiz_versioning.py::test_quiz_version_tang_khi_da_tung_co_tran_dau`<br/>`test_quiz_versioning.py::test_quiz_snapshot_bat_bien_khi_quiz_bi_sua_sau_do` | ✅ Done |
 | **CLI-BOTS** | Lệnh CLI bầy bot 50 concurrent join PIN, WS và nộp bài | `app.cli` (`bots`) | `test_cli_bots.py` (7 tests)<br/>`test_cli_bots.py::test_cli_bots_command_validation` | ✅ Done |
+| **FR-AIRPT-01** | Tạo báo cáo tự động khi kết thúc trận, WS notify | `app.services.report_service` | `test_game_report.py::test_game_report_success_with_fake_gemini` | ✅ Done |
+| **FR-AIRPT-02** | Đúng 1 lần gọi Gemini/trận (ARQ dedup job_id + Unique DB) | `app.game.write_behind` | `test_game_report.py::test_single_call_invariant_and_sql_proof` | ✅ Done |
+| **FR-AIRPT-03** | Prompt chỉ chứa thống kê tổng hợp, không tên người chơi | `GeminiGateway` | `test_game_report.py::test_report_prompt_does_not_contain_player_identifiers` | ✅ Done |
+| **FR-AIRPT-04** | Cấu trúc báo cáo, validate lớp 2 (chống hallucination) | `report_service` | `test_game_report.py::test_game_report_topic_hallucination_validation` | ✅ Done |
+| **FR-AIRPT-05** | Nhận xét cá nhân hóa 0 lần gọi AI | `report_service` | `test_game_report.py::test_player_personal_feedback_zero_ai_call` | ✅ Done |
+| **FR-AIRPT-06** | Chế độ degraded khi AI lỗi (429/timeout/JSON hỏng) | `report_service` | `test_game_report.py::test_game_report_gemini_429_degraded`<br/>`test_game_report.py::test_game_report_malformed_json_degraded` | ✅ Done |
+| **FR-AIRPT-07** | Xem lại báo cáo & Retry AI tối đa 3 lần | `app.api.v1.games` | `test_game_report.py::test_report_retry_endpoint_limit_3_attempts` | ✅ Done |
+| **FR-HIST-01** | Xem lịch sử các trận đã chơi (Player) | `app.api.v1.games` | `test_game_flow.py` & `HistoryPage.tsx` | ✅ Done |
+| **FR-HIST-02** | Xem lịch sử các trận đã tổ chức (Host) | `app.api.v1.games` | `test_game_flow.py` & `HistoryPage.tsx` | ✅ Done |
+| **FR-HIST-03** | Kết quả của khách (Guest Token phạm vi trận đấu) | `app.api.v1.games` | `test_game_report.py` & `GameReportPage.tsx` | ✅ Done |
+| **FR-ADM-01** | Khóa/mở khóa tài khoản người dùng kèm ghi nhật ký | `app.services.admin_service` | `test_admin.py::test_admin_ban_and_unban_user` | ✅ Done |
+| **FR-ADM-02** | Cấp và thu hồi vai trò HOST cho người dùng | `app.services.admin_service` | `test_admin.py::test_admin_manage_user_role` | ✅ Done |
+| **FR-ADM-03** | Ẩn quiz vi phạm kèm lý do bắt buộc $\ge 3$ ký tự | `app.services.admin_service` | `test_admin.py::test_admin_hide_and_unhide_quiz` | ✅ Done |
+| **FR-ADM-04** | Dashboard theo dõi số trận, WS connections, AI quota (cache 45s) | `app.services.admin_service` | `test_admin.py::test_admin_dashboard_and_audit_logs` | ✅ Done |
+| **FR-ADM-05** | Nhật ký kiểm toán audit logs ghi lại mọi thao tác quản trị | `app.models.audit` | `test_admin.py::test_admin_dashboard_and_audit_logs` | ✅ Done |
+| **FR-QUIZ-09** | Render Markdown an toàn, vô hiệu hóa XSS script/onerror | `SafeMarkdown.tsx` | `SafeMarkdown.test.tsx` (4 tests) | ✅ Done |
 
 
 
