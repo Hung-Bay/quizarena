@@ -9,13 +9,15 @@ Chịu trách nhiệm:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import signal
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Query, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.v1 import realtime
 from app.api.v1.realtime import redeem_ws_ticket
@@ -34,15 +36,32 @@ _DEMO_HTML_PATH = Path(__file__).parent / "static" / "demo.html"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Khởi tạo Redis và các bộ quản lý kết nối realtime."""
+    """Khởi tạo Redis, ConnectionManager và quản lý chu trình Graceful Drain."""
+    app.state.is_draining = False
     app.state.redis = create_redis()
     app.state.manager = ConnectionManager(app.state.redis)
     app.state.handler = MessageHandler(app.state.manager, app.state.redis)
+
+    loop = asyncio.get_running_loop()
+
+    def _trigger_drain() -> None:
+        if not getattr(app.state, "is_draining", False):
+            app.state.is_draining = True
+            log.warning("Nhận tín hiệu SIGTERM -> Kích hoạt Graceful Drain cho Realtime service")
+            asyncio.create_task(app.state.manager.drain_and_close_all())
+
+    try:
+        loop.add_signal_handler(signal.SIGTERM, _trigger_drain)
+    except (NotImplementedError, AttributeError):
+        pass  # Windows event loop không hỗ trợ add_signal_handler
+
     log.info("QuizArena Realtime service started")
     try:
         yield
     finally:
-        await app.state.manager.close_all()
+        app.state.is_draining = True
+        log.info("Lifespan shutdown: Bắt đầu drain và đóng mọi kết nối cục bộ")
+        await app.state.manager.drain_and_close_all()
         await app.state.redis.aclose()
         log.info("QuizArena Realtime service stopped")
 
@@ -55,6 +74,17 @@ app.include_router(realtime.router, prefix="/api/v1")
 async def healthz() -> dict[str, str]:
     """Liveness probe cho Kubernetes / Docker healthcheck."""
     return {"status": "ok"}
+
+
+@app.get("/readyz")
+async def readyz() -> Response:
+    """Readiness probe cho Kubernetes / Nginx gateway."""
+    if getattr(app.state, "is_draining", False):
+        return JSONResponse(
+            status_code=503,
+            content={"status": "draining", "message": "Server đang drain kết nối"},
+        )
+    return JSONResponse(status_code=200, content={"status": "ready"})
 
 
 @app.get("/metrics")
@@ -101,6 +131,11 @@ async def game_websocket(
     """
     if not ticket:
         await ws.close(code=4001, reason="TICKET_INVALID")
+        return
+
+    # 0. Nếu replica đang trong quá trình Drain -> Từ chối kết nối mới bằng mã 1013 (Try Again Later)
+    if getattr(app.state, "is_draining", False):
+        await ws.close(code=1013, reason="SERVER_DRAINING")
         return
 
     redis = app.state.redis
