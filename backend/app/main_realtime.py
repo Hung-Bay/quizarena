@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -50,15 +51,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             log.warning("Nhận tín hiệu SIGTERM -> Kích hoạt Graceful Drain cho Realtime service")
             asyncio.create_task(app.state.manager.drain_and_close_all())
 
-    try:
-        loop.add_signal_handler(signal.SIGTERM, _trigger_drain)
-    except (NotImplementedError, AttributeError):
-        pass  # Windows event loop không hỗ trợ add_signal_handler
+    sig_installed = False
+    # Signal handlers chỉ được cài đặt từ main thread của main interpreter (tránh lỗi khi chạy TestClient trong worker thread)
+    if threading.current_thread() is threading.main_thread():
+        try:
+            loop.add_signal_handler(signal.SIGTERM, _trigger_drain)
+            sig_installed = True
+        except (NotImplementedError, AttributeError, ValueError, RuntimeError):
+            pass  # Windows event loop hoặc môi trường test runner không hỗ trợ signal handler
 
     log.info("QuizArena Realtime service started")
     try:
         yield
     finally:
+        if sig_installed:
+            try:
+                loop.remove_signal_handler(signal.SIGTERM)
+            except (NotImplementedError, AttributeError, ValueError, RuntimeError):
+                pass
         app.state.is_draining = True
         log.info("Lifespan shutdown: Bắt đầu drain và đóng mọi kết nối cục bộ")
         await app.state.manager.drain_and_close_all()
