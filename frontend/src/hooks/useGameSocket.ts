@@ -412,12 +412,26 @@ export function useGameSocket(gameId: string, customToken?: string | null) {
             ws.close(4002, "KICKED");
             break;
 
-          case "server.draining":
-            // Server báo replica đang drain -> kết nối lại tức thì
-            console.warn("[WS] Server draining. Reconnecting immediately...");
-            ws.close(1000, "Server draining");
-            connect();
+          case "server.draining": {
+            // Server báo replica đang drain -> kết nối lại theo retry_after_ms
+            const retryAfter =
+              env.data && typeof env.data.retry_after_ms === "number"
+                ? env.data.retry_after_ms
+                : 500;
+            console.warn(
+              `[WS] Server draining. Reconnecting after ${retryAfter}ms...`
+            );
+            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+            try {
+              ws.close(1001, "Server draining");
+            } catch {
+              // ignore
+            }
+            reconnectTimerRef.current = window.setTimeout(() => {
+              connect();
+            }, retryAfter);
             break;
+          }
 
           case "error":
             dispatch({ type: "SET_ERROR", payload: env.data.message });
@@ -445,6 +459,11 @@ export function useGameSocket(gameId: string, customToken?: string | null) {
       if (event.code === 4003) {
         // Trận đấu đã kết thúc
         dispatch({ type: "SET_CONNECTION_STATUS", payload: "ended" });
+        return;
+      }
+
+      if (event.reason === "Server draining") {
+        // Đã được lập lịch kết nối lại trong handler server.draining
         return;
       }
 

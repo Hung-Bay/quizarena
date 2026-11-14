@@ -37,6 +37,13 @@ app.include_router(ai_jobs.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 
 
+@app.get("/readyz")
+@app.get("/api/v1/readyz")
+async def readyz() -> dict[str, str]:
+    """Readiness probe cho API gateway."""
+    return {"status": "ready"}
+
+
 @app.get("/metrics")
 @app.get("/api/v1/metrics")
 async def metrics() -> Response:

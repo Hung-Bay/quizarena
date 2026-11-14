@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -368,6 +369,56 @@ class ConnectionManager:
         """Gửi thông điệp trực tiếp cho một kết nối WebSocket."""
         serialized = json.dumps(envelope)
         await ws.send_text(serialized)
+
+    async def drain_and_close_all(self, reason: str = "SERVER_DRAINING") -> None:
+        """Kích hoạt cơ chế Graceful Drain cho toàn bộ kết nối WebSocket:
+        1. Gửi bản tin `server.draining` (kèm retry_after_ms + random jitter 200..800ms).
+        2. Chờ 200ms để client nhận tin và lập lịch kết nối sang replica khác.
+        3. Đóng các kết nối WebSocket cục bộ với mã 1001 (Going Away).
+        4. Dọn dẹp PubSub tasks và kết nối Redis.
+        """
+        async with self._lock:
+            all_conns: list[ClientConnection] = []
+            for game_conns in self.active_connections.values():
+                all_conns.extend(game_conns.values())
+
+        if all_conns:
+            log.warning(
+                "Đang phát server.draining tới %d kết nối cục bộ...",
+                len(all_conns),
+            )
+
+            async def _send_draining(conn: ClientConnection) -> None:
+                retry_after = random.randint(200, 800)
+                msg = {
+                    "type": "server.draining",
+                    "v": 1,
+                    "data": {
+                        "retry_after_ms": retry_after,
+                        "reason": reason,
+                    },
+                }
+                try:
+                    await asyncio.wait_for(conn.ws.send_text(json.dumps(msg)), timeout=1.0)
+                except Exception:
+                    pass
+
+            await asyncio.gather(*(_send_draining(c) for c in all_conns), return_exceptions=True)
+
+            # Chờ 200ms để TCP buffer đẩy dữ liệu đi
+            await asyncio.sleep(0.2)
+
+            async def _close_ws(conn: ClientConnection) -> None:
+                try:
+                    await asyncio.wait_for(
+                        conn.ws.close(code=1001, reason="Server draining"), timeout=1.0
+                    )
+                except Exception:
+                    pass
+
+            await asyncio.gather(*(_close_ws(c) for c in all_conns), return_exceptions=True)
+
+        await self.close_all()
 
     async def close_all(self) -> None:
         """Dọn dẹp toàn bộ kết nối và task nền khi server shutdown."""

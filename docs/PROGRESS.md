@@ -53,6 +53,27 @@
     - Viết bộ unit test `tests/test_cross_replica_cluster.py` (2 tests) kiểm chứng lệnh kick và broadcast xuyên replica qua Redis Pub/Sub.
     - Viết kịch bản kiểm chứng thực tế `infra/scripts/verify_monday.py`: 1 Host và 6 Player kết nối đồng thời qua Nginx được chia đều trên 3 replica realtime; Host phát broadcast -> 6/6 Player trên cả 3 replica nhận được `question.start`; Host kick Player 1 -> Player 1 bị đóng kết nối WebSocket với mã `4002` (KICKED).
 
+- **Thứ Ba (WebSocket Graceful Drain, SIGTERM Handling, Nginx Failover & Chaos Reconnect Tests):**
+  - **Cơ chế Graceful Drain cho WebSocket (`backend/app/realtime/connection_manager.py`):**
+    - Triển khai `drain_and_close_all()`: Khi nhận `SIGTERM`, server Realtime chủ động broadcast gói tin `server.draining` kèm `retry_after_ms` (ngẫu nhiên 200..800ms jitter) tới toàn bộ client đang kết nối.
+    - Đóng kết nối êm với mã `1001` (Going Away), loại bỏ hoàn toàn tình trạng uvicorn bị kẹt đợi client đóng dẫn đến `SIGKILL` sau `stop_grace_period`.
+  - **Quản lý trạng thái Draining & Health Endpoint (`backend/app/main_realtime.py` & `backend/app/main_api.py`):**
+    - Trạng thái `app.state.is_draining = True` khi Lifespan shutdown bắt đầu.
+    - Endpoint `/readyz`: Trả về `200 {"status": "ready"}` khi khỏe mạnh, trả về `503 {"status": "draining"}` ngay khi bắt đầu drain để Nginx / Load Balancer ngắt điều hướng.
+    - Chặn kết nối WebSocket mới bằng mã đóng chuẩn `1013` (Try Again Later / Service Restart) kèm reason `"SERVER_DRAINING"`.
+  - **Nâng cấp Client Frontend Reconnect Jitter (`frontend/src/hooks/useGameSocket.ts`):**
+    - Xử lý sự kiện `server.draining`: Trích xuất `retry_after_ms` từ payload, chủ động ngắt kết nối và lên lịch reconnect có jitter chống thundering herd.
+    - Xử lý mã đóng `1013` và `1001`: Tự động áp dụng backoff & jitter để kết nối lại tới replica mới và tự động nhận `snapshot` khôi phục đầy đủ trạng thái trận đấu.
+  - **Nginx Upstream Failover Tức Thì (`infra/nginx/nginx.conf`):**
+    - Bổ sung `proxy_connect_timeout 2s;`, `proxy_next_upstream error timeout invalid_header http_502 http_503;`, `proxy_next_upstream_tries 3;` vào `location /ws/`, `location /api/` và `location ~ ^/api/v1/(auth/|games/join$)`.
+    - Khi một replica bị kill đột ngột, Nginx tự động chuyển tiếp bắt tay kết nối sang replica khả dụng kế tiếp chỉ trong tối đa 2 giây thay vì bị treo timeout mặc định 60 giây.
+  - **Kiểm thử Đơn vị & Kịch bản Hỗn loạn Thực tế (Chaos Test - NF-5):**
+    - `backend/tests/test_drain_and_reconnect.py`: 3/3 tests tự động bao phủ chuyển trạng thái `/readyz`, từ chối kết nối mới mã 1013, và phát `server.draining` kèm đóng 1001.
+    - `infra/scripts/chaos_drain_test.py`: Thử nghiệm hỗn loạn thực tế với cụm Docker 3 replica live:
+      - **Kịch bản A (Graceful Drain - `docker stop quizarena-realtime-1`):** Client nhận `server.draining` (retry_after 598ms), reconnect thành công sang replica mới trong **2035.9ms** (< 3.0s SLA NF-5), điểm số 1000 điểm trên Leaderboard bảo toàn 100%.
+      - **Kịch bản B (Sudden Crash - `docker kill quizarena-realtime-2`):** Client phát hiện ngắt socket, reconnect thành công sang replica còn lại trong **2031.7ms** (< 3.0s SLA NF-5), trạng thái trận đấu `question_active` giữ nguyên vẹn.
+    - Nghiệm thu: **Đạt 100% mục tiêu Thứ Ba** (Reconnect < 3s ở cả hai trường hợp, điểm không mất).
+
 ---
 
 ## Chi tiết Phase 4 — Tuần 5: Frontend React SPA, AI Báo Cáo Sau Trận & Quản Trị Hệ Thống

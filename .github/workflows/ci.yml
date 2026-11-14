@@ -58,6 +58,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
+          python-version: "3.12"
 
       - name: Cài thư viện (đúng theo uv.lock)
         run: uv sync --frozen
