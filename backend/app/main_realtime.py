@@ -14,12 +14,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
 from app.api.v1 import realtime
 from app.api.v1.realtime import redeem_ws_ticket
 from app.core.app_factory import create_app
+from app.core.logging import game_id_ctx, user_id_ctx
+from app.core.metrics import WS_CONNECTIONS, metrics_endpoint_response
 from app.core.redis import create_redis
 from app.realtime.connection_manager import ConnectionManager
 from app.realtime.handlers import MessageHandler
@@ -53,6 +55,12 @@ app.include_router(realtime.router, prefix="/api/v1")
 async def healthz() -> dict[str, str]:
     """Liveness probe cho Kubernetes / Docker healthcheck."""
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    """Prometheus metrics endpoint cho Realtime service."""
+    return metrics_endpoint_response()
 
 
 @app.get("/demo", response_class=HTMLResponse)
@@ -149,6 +157,9 @@ async def game_websocket(
 
     # 4. Chấp nhận kết nối
     await ws.accept()
+    game_id_ctx.set(game_id)
+    user_id_ctx.set(client_id)
+    WS_CONNECTIONS.inc()
     conn = await manager.connect(
         ws,
         game_id=game_id,
@@ -193,5 +204,6 @@ async def game_websocket(
     except Exception as exc:  # noqa: BLE001
         log.debug("Lỗi kết nối WebSocket của client %s (game %s): %s", client_id, game_id, exc)
     finally:
+        WS_CONNECTIONS.dec()
         await redis.delete(f"game:{game_id}:presence:{client_id}")
         await manager.disconnect(game_id, client_id)

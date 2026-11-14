@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
 from redis.asyncio import Redis
 
+from app.core.logging import game_id_ctx, user_id_ctx
+from app.core.metrics import GAME_ANSWER_DURATION_SECONDS, GAME_ANSWERS_TOTAL
 from app.game import clock, lua_engine
 from app.game.enums import WSMessageType
 from app.game.schemas import (
@@ -40,6 +43,8 @@ class MessageHandler:
 
     async def handle_message(self, conn: ClientConnection, raw_text: str) -> None:
         """Parse envelope, kiểm tra phiên bản và định tuyến đến hàm xử lý tương ứng."""
+        game_id_ctx.set(conn.game_id)
+        user_id_ctx.set(conn.client_id)
         try:
             payload = json.loads(raw_text)
         except Exception:
@@ -390,6 +395,7 @@ class MessageHandler:
             return
 
         # Thực thi kịch bản chấm điểm và ghi nhận atomic trên Redis
+        submit_start_t = time.perf_counter()
         res = await lua_engine.execute_submit_answer(
             self.redis,
             game_id=game_id,
@@ -412,6 +418,12 @@ class MessageHandler:
             data=ack_data.model_dump(mode="json"),
         )
         await self.manager.send_personal(conn.ws, ack_envelope.model_dump(mode="json"))
+
+        # Ghi nhận metric thời gian phản hồi answer.ack (NF-2: p95 < 150ms)
+        submit_elapsed = time.perf_counter() - submit_start_t
+        status_label = "accepted" if res.accepted else (res.error_code or "rejected")
+        GAME_ANSWER_DURATION_SECONDS.labels(status=status_label).observe(submit_elapsed)
+        GAME_ANSWERS_TOTAL.labels(status=status_label).inc()
 
         # Nếu tất cả người chơi trong phòng đã nộp bài (all_answered) -> đóng câu hỏi sớm ngay lập tức!
         if res.all_answered:

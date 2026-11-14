@@ -4,12 +4,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 
 from app.api.v1 import admin, ai_jobs, auth, games, health, quizzes, realtime
 from app.core.app_factory import create_app
 from app.core.db import create_engine, create_session_factory
+from app.core.metrics import metrics_endpoint_response
 from app.core.redis import create_redis
 
 
@@ -34,6 +35,14 @@ app.include_router(realtime.router, prefix="/api/v1")
 app.include_router(quizzes.router, prefix="/api/v1")
 app.include_router(ai_jobs.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
+
+
+@app.get("/metrics")
+@app.get("/api/v1/metrics")
+async def metrics() -> Response:
+    """Prometheus metrics endpoint (chỉ truy cập từ nội bộ hoặc qua monitoring)."""
+    return metrics_endpoint_response()
+
 
 _DEMO_HTML_PATH = Path(__file__).parent / "static" / "demo.html"
 

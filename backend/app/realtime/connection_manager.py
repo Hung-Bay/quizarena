@@ -22,6 +22,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
 from redis.asyncio.client import PubSub
 
+from app.core.metrics import GAME_BROADCAST_DURATION_SECONDS
+
 log = logging.getLogger("app.realtime.connection_manager")
 
 
@@ -191,7 +193,7 @@ class ConnectionManager:
                     continue
 
                 # Fan-out cho toàn bộ client cục bộ của game
-                await self.broadcast_local(game_id, raw_data)
+                await self.broadcast_local(game_id, raw_data, msg_type=msg_type or "unknown")
 
         except asyncio.CancelledError:
             log.debug("Pub/Sub listener cho game %s đã nhận tín hiệu dừng", game_id)
@@ -214,7 +216,9 @@ class ConnectionManager:
             except Exception as exc:  # noqa: BLE001
                 log.debug("Lỗi khi đóng WebSocket của player bị kick %s: %s", player_id, exc)
 
-    async def broadcast_local(self, game_id: str, serialized_json: str) -> None:
+    async def broadcast_local(
+        self, game_id: str, serialized_json: str, msg_type: str = "unknown"
+    ) -> None:
         """Phát thông điệp đã serialize sẵn tới toàn bộ kết nối cục bộ của game.
 
         Sử dụng asyncio.wait_for với timeout 1.5s để bảo vệ vòng lặp,
@@ -225,6 +229,8 @@ class ConnectionManager:
 
         if not conns:
             return
+
+        broadcast_start_t = time.perf_counter()
 
         async def _safe_send(conn: ClientConnection) -> None:
             try:
@@ -243,6 +249,10 @@ class ConnectionManager:
 
         # Chạy đồng thời cho toàn bộ kết nối cục bộ
         await asyncio.gather(*(_safe_send(c) for c in conns), return_exceptions=True)
+
+        # Đo thời gian broadcast cục bộ (NF-3: p95 < 500ms)
+        elapsed = time.perf_counter() - broadcast_start_t
+        GAME_BROADCAST_DURATION_SECONDS.labels(msg_type=msg_type).observe(elapsed)
 
     async def broadcast_personalized(self, game_id: str, envelope: dict[str, Any]) -> None:
         """Phát thông điệp cá nhân hóa (question.result, game.finished) cho từng kết nối.
@@ -325,8 +335,13 @@ class ConnectionManager:
         for h in hosts:
             tasks.append(asyncio.create_task(_safe_send_to(h, raw_base)))
 
+        start_t = time.perf_counter()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+            elapsed = time.perf_counter() - start_t
+            GAME_BROADCAST_DURATION_SECONDS.labels(msg_type=msg_type or "personalized").observe(
+                elapsed
+            )
 
     async def broadcast_game(self, game_id: str, envelope: dict[str, Any]) -> None:
         """Gán seq tự tăng và phát thông điệp lên kênh Redis Pub/Sub của game."""

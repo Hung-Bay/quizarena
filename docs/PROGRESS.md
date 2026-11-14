@@ -14,9 +14,44 @@
 | **P2** | Quiz Authoring + AI Sinh Quiz | CRUD quiz, PDF upload, Gemini Gateway, Quota rate limiter, SSE | ✅ Hoàn thành | Tuần 3 |
 | **P3** | Live Game Engine | State machine, Redis Lua atomic, Leaderboard ZSET, Game clock, Write-behind, CLI Bots | ✅ Hoàn thành | Tuần 4 |
 | **P4** | Frontend + AI Báo cáo sau trận | React FE, 1 call Gemini/game, Báo cáo cá nhân, Degraded mode | ✅ Hoàn thành | Tuần 5 |
-| **P5** | Scale Realtime & Nginx Gateway | Scale replica, Redis Pub/Sub, Loadtest 300 bots, Anti-cheat | ⏳ Chưa bắt đầu | Tuần 6 |
+| **P5** | Scale Realtime & Nginx Gateway | Scale replica, Redis Pub/Sub, Loadtest 300 bots, Anti-cheat | 🚀 Đang thực hiện | Tuần 6 |
 | **P6** | Cloud, Domain, HTTPS, CI/CD | Oracle Cloud ARM, Let's Encrypt, Deploy zero-downtime | ⏳ Chưa bắt đầu | Tuần 7 |
 | **P7** | Observability, Autoscale, Demo | Grafana, Loki, Autoscale, Backup restore, SRS v1.0, Báo cáo | ⏳ Chưa bắt đầu | Tuần 8 |
+
+---
+
+## Chi tiết Phase 5 — Tuần 6: Scale Realtime & Nginx API Gateway Nâng Cao
+
+### Quyết định đã chốt (Thứ Hai)
+1. **Đo SLA p95 (NF-2, NF-3):** Thêm `prometheus-client` vào backend. Thiết lập Histogram `game_answer_duration_seconds` với 14 buckets dày đặc quanh ngưỡng 150ms. PromQL tính toán bằng `histogram_quantile(0.95, sum by (le) (rate(...)))`, **tuyệt đối không trung bình hóa p95**. Tránh bùng nổ cardinality bằng cách không dùng `game_id` hay `user_id` làm nhãn metric.
+2. **`auth_request` cho Grafana:** Sẽ cấp Cookie HttpOnly phiên đăng nhập cho ADMIN; `/internal/auth/verify` chấp nhận cả Cookie và Bearer; ghi nhận TTL cache làm chậm thu hồi quyền tối đa bằng thời gian cache.
+3. **Chống Spam WS (Kịch bản 5 §7.11):** Thống nhất hành vi: sau khi vượt ngưỡng liên tục sẽ đóng WebSocket ngắt kết nối (thống nhất code và SRS FR-GAME-21).
+4. **Chuẩn bị Drain cho Thứ Ba:** Xử lý tín hiệu `SIGTERM`, phát `server.draining` (kèm `retry_after_ms`), từ chối kết nối mới bằng mã 1013, `/readyz` trả 503.
+5. **Môi trường Bot:** Chạy bot cùng máy dev trong Phase 5, ghi nhận hiện tượng cạnh tranh tài nguyên CPU/RAM với Docker.
+6. **Mở rộng ADR-004:** Đo so sánh định lượng `realtime=1` vs `realtime=3` trên cùng 300 bots.
+
+### Nhật ký hàng ngày
+
+- **Thứ Hai (Prometheus Metrics, Structured Logging Context, Scale Multi-Replica & Cross-Replica Verification):**
+  - **Tích hợp `prometheus-client` & Module Metrics (`app/core/metrics.py`):**
+    - `game_answer_duration_seconds`: Histogram đo thời gian xử lý đáp án phía server với dải bucket dày quanh 150ms (NF-2).
+    - `game_broadcast_duration_seconds`: Histogram đo thời gian phát tán thông điệp WebSocket (NF-3).
+    - `ws_connections`: Gauge số kết nối WebSocket trên từng replica.
+    - `http_request_duration_seconds`: Đo thời gian xử lý HTTP với URL chuẩn hóa (regex thay UUID và integer để chống high-cardinality).
+    - Phơi endpoint `/metrics` trên cả API và Realtime service.
+  - **Gắn `replica_id`, `game_id`, `user_id` vào Log JSON một dòng (NF-7):**
+    - `replica_id`: Tự động nhận diện qua hostname container hoặc `REPLICA_ID` env.
+    - ContextVars `game_id_ctx` và `user_id_ctx`: Tự động gán ngữ cảnh khi xử lý kết nối WebSocket và message, giúp tra cứu toàn bộ log của 1 trận đấu qua `game_id`.
+  - **Khởi tạo Profile `monitoring` trong Docker Compose:**
+    - `infra/prometheus/prometheus.yml`: Cấu hình DNS SD tự động khám phá mọi container IP của `api` và `realtime`.
+    - `infra/grafana/provisioning/datasources/prometheus.yml`: Tự động liên kết datasource Prometheus khi khởi động Grafana.
+  - **Triển khai và Nghiệm thu Cụm Scale `--scale realtime=3 --scale api=2`:**
+    - Khởi chạy thành công 3 replica `realtime` (`quizarena-realtime-1..3`), 2 replica `api`, `nginx`, `worker`, `prometheus`, `grafana`.
+    - Prometheus phát hiện tự động và cào dữ liệu thành công từ cả 3 replica realtime và 2 replica api (tất cả đều trạng thái `up`).
+    - Nginx cân bằng tải `least_conn`: Kiểm tra log Nginx cho `/ws/` chứng minh các kết nối được phân bổ đều trên các IP upstream (`172.20.0.4`, `172.20.0.7`, `172.20.0.9`).
+  - **Kiểm thử Điều khiển & Broadcast Xuyên Replica:**
+    - Viết bộ unit test `tests/test_cross_replica_cluster.py` (2 tests) kiểm chứng lệnh kick và broadcast xuyên replica qua Redis Pub/Sub.
+    - Viết kịch bản kiểm chứng thực tế `infra/scripts/verify_monday.py`: 1 Host và 6 Player kết nối đồng thời qua Nginx được chia đều trên 3 replica realtime; Host phát broadcast -> 6/6 Player trên cả 3 replica nhận được `question.start`; Host kick Player 1 -> Player 1 bị đóng kết nối WebSocket với mã `4002` (KICKED).
 
 ---
 
