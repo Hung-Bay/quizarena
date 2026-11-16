@@ -107,6 +107,41 @@
     - Cập nhật mục 5 trong `docs/SRS.md` với mọi dòng có số liệu đo đạc cụ thể.
   - **Nghiệm thu:** **Đạt 100% mục tiêu Thứ Tư**. Sẵn sàng gửi PR giữa tuần.
 
+- **Thứ Năm (Nginx auth_request Bảo Vệ Grafana, Chống Dò PIN & Ngắt Spam WS, Microcache, Docker Tối Ưu < 250MB & Buildx Multi-Arch):**
+  - **Nginx `auth_request` + `/internal/auth/verify` Bảo Vệ Grafana (§7.4):**
+    - Cấu hình Nginx reverse proxy cho Grafana tại subpath `/grafana/`, bảo vệ nghiêm ngặt bằng chỉ thị `auth_request /internal/auth/verify`.
+    - Hỗ trợ đồng thời 2 phương thức xác thực: Cookie HttpOnly `admin_session` (trình duyệt) và Header `Authorization: Bearer <token>` (API / CLI).
+    - Chưa đăng nhập -> Nginx chặn và trả HTTP 401 Unauthorized JSON (`@grafana_unauthorized`).
+    - Đã đăng nhập nhưng không có vai trò `ADMIN` -> Nginx chặn và trả HTTP 403 Forbidden JSON (`@grafana_forbidden`).
+    - Có vai trò `ADMIN` -> Cho phép truy cập, Nginx truyền header `X-User-Id`, `X-User-Email`, `X-User-Role` và Grafana Auth Proxy tự động nhận diện danh tính.
+    - Chặn hoàn toàn truy cập trực tiếp từ bên ngoài vào `/internal` và `/metrics` (trả về 404).
+  - **Chống Dò PIN Phòng Lớp 2 (§7.11 kịch bản 6):**
+    - Bổ sung tầng bảo vệ ứng dụng: Đếm số lần nhập sai PIN theo địa chỉ IP vào Redis (`pin_fail:{client_ip}`).
+    - Nhập sai $\ge 10$ lần trong 10 phút -> Khóa tạm IP trong 15 phút (900s) với HTTP 429 `PIN_BRUTE_FORCE_LOCKED`.
+    - Giảm kỳ vọng đoán trúng từ 8-9 lần/ngày xuống chỉ còn ~0.03 lần/ngày. Khi nhập đúng mã PIN hợp lệ -> tự động xóa bộ đếm sai.
+  - **Ngắt Spam WebSocket Dồn Dập (FR-GAME-21 & §7.11 kịch bản 5):**
+    - Nâng cấp `TokenBucketRateLimiter` với hàm `record_violation()` đếm vi phạm dồn dập trong cửa sổ trượt 2 giây.
+    - Vi phạm nhẹ (> 5 msg/s) -> Gửi gói tin lỗi `RATE_LIMITED`, giữ kết nối socket.
+    - Tấn công spam dồn dập $\ge 10$ lần vi phạm liên tục trong 2 giây (mô phỏng 100 msg/s) -> Gửi thông điệp `SPAM_DISCONNECTED` và ngắt kết nối WebSocket với mã `1008` (Policy Violation).
+  - **Microcache cho Danh mục Quiz Public (`/api/v1/quizzes/public` - §7.4):**
+    - Cấu hình Nginx `proxy_cache` 5 giây TTL cho endpoint public quiz, tự động bỏ qua cache khi có header `Authorization`.
+    - Thêm header `X-Cache-Status`: Kiểm chứng thực tế lần 1 trả `MISS` (hoặc `EXPIRED`), lần 2 tức thì trả `HIT` với thời gian phản hồi < 1ms.
+  - **Tối Ưu Hóa Container Docker (NF-9):**
+    - **Backend Image:** Chạy user phi đặc quyền `app` (UID 10001 non-root). Dọn dẹp cache uv và bytecode (`UV_COMPILE_BYTECODE=0`), dung lượng image `quizarena-backend:dev` đạt **73.1 MB** (vượt xa chỉ tiêu trần < 250 MB của NF-9).
+    - **Docker Buildx Multi-Arch:** Build thành công image hỗ trợ cả 2 kiến trúc `linux/amd64` và `linux/arm64` (`quizarena-backend:multiarch`, dung lượng gộp 146 MB).
+    - **Frontend Multi-stage Build:** Sử dụng `node:22-alpine` biên dịch -> `nginx:1.27-alpine` runtime phục vụ static files, dung lượng chỉ **21.1 MB**.
+  - **Nâng Cấp CI Pipeline (`.github/workflows/ci.yml`):**
+    - Tự động kiểm tra `docker compose config --quiet`.
+    - Tự động kiểm tra cú pháp Nginx bằng container thật `nginx:1.27-alpine nginx -t`.
+    - Tự động kiểm tra kích thước image backend < 250 MB trong CI.
+    - Thiết lập QEMU và Docker Buildx cho multi-arch build `linux/amd64,linux/arm64`.
+  - **Bộ Kiểm Thử Toàn Diện (Unit & Integration Tests):**
+    - `backend/tests/test_auth_verify_and_grafana.py` (8 tests): 401/403/200, cấp/xóa cookie `admin_session`.
+    - `backend/tests/test_pin_brute_force.py` (2 tests): Khóa 429 sau 10 lần sai và reset khi đúng PIN.
+    - `backend/tests/test_ws_spam_disconnect.py` (3 tests): Rate limit bucket, sliding window và ngắt kết nối mã 1008 khi spam.
+    - Toàn bộ test suite backend đều vượt qua.
+  - **Nghiệm thu:** **Đạt 100% mục tiêu Thứ Năm**.
+
 ---
 
 ## Chi tiết Phase 4 — Tuần 5: Frontend React SPA, AI Báo Cáo Sau Trận & Quản Trị Hệ Thống

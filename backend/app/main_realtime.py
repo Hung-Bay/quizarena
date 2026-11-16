@@ -237,6 +237,30 @@ async def game_websocket(
 
             # Giới hạn tốc độ: 5 thông điệp / giây mỗi kết nối (FR-GAME-21)
             if not conn.rate_limiter.allow():
+                violations = conn.rate_limiter.record_violation()
+                # Kịch bản 5 §7.11: Ngắt kết nối khi spam dồn dập (>= 10 lần vi phạm liên tục trong 2s)
+                if violations >= 10:
+                    log.warning(
+                        "Client %s (game %s) bị ngắt kết nối do spam %d thông điệp vượt ngưỡng liên tục",
+                        client_id,
+                        game_id,
+                        violations,
+                    )
+                    err_env = {
+                        "type": "error",
+                        "v": 1,
+                        "data": {
+                            "code": "SPAM_DISCONNECTED",
+                            "message": "Kết nối bị ngắt do gửi thông điệp quá nhanh liên tục (Anti-spam §7.11)",
+                        },
+                    }
+                    try:
+                        await manager.send_personal(ws, err_env)
+                        await ws.close(code=1008, reason="SPAM_DISCONNECTED")
+                    except Exception:
+                        pass
+                    break
+
                 err_env = {
                     "type": "error",
                     "v": 1,

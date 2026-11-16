@@ -36,6 +36,8 @@ class TokenBucketRateLimiter:
         self.refill_rate = refill_rate
         self.tokens = capacity
         self.last_refill = time.monotonic()
+        self.violation_count: int = 0
+        self.last_violation: float = 0.0
 
     def allow(self, cost: float = 1.0) -> bool:
         """Kiểm tra và trừ token nếu đủ quota."""
@@ -47,6 +49,15 @@ class TokenBucketRateLimiter:
             self.tokens -= cost
             return True
         return False
+
+    def record_violation(self) -> int:
+        """Ghi nhận số lần vi phạm rate limit dồn dập trong cửa sổ 2s (§7.11 kịch bản 5)."""
+        now = time.monotonic()
+        if now - self.last_violation > 2.0:
+            self.violation_count = 0
+        self.last_violation = now
+        self.violation_count += 1
+        return self.violation_count
 
 
 @dataclass

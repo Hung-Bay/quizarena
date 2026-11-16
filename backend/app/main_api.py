@@ -44,6 +44,16 @@ async def readyz() -> dict[str, str]:
     return {"status": "ready"}
 
 
+@app.get("/internal/auth/verify")
+async def internal_auth_verify(
+    request: auth.Request,
+    session: auth.Session,
+    redis: auth.RedisClient,
+) -> Response:
+    """Điểm xác thực nội bộ cho Nginx auth_request."""
+    return await auth.verify_admin(request, session, redis)
+
+
 @app.get("/metrics")
 @app.get("/api/v1/metrics")
 async def metrics() -> Response:
