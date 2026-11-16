@@ -8,7 +8,7 @@ FROM python:${PYTHON_VERSION}-slim AS builder
 # Ghim phiên bản uv để build lặp lại được (cập nhật khi nâng cấp uv)
 COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /bin/
 
-ENV UV_COMPILE_BYTECODE=1 \
+ENV UV_COMPILE_BYTECODE=0 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
@@ -16,10 +16,14 @@ WORKDIR /app
 
 # Chỉ cần pyproject.toml + uv.lock để cài thư viện.
 # Layer này được cache, chỉ build lại khi hai file này đổi.
+# Dọn dẹp __pycache__, tests và stubs để đảm bảo kích thước image < 250 MB (NF-9).
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-install-project \
+    && find /app/.venv -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true \
+    && find /app/.venv -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true \
+    && find /app/.venv -name "*.pyi" -delete 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime — chỉ chứa venv + mã nguồn, không có uv, không có công cụ build

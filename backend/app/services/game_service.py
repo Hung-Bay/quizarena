@@ -296,12 +296,48 @@ async def join_game(
             status_code=400,
         )
 
+    # 0. Lớp 2 chống dò PIN phòng (§7.11 kịch bản 6):
+    # Kiểm tra IP có đang bị tạm khóa (10 lần sai trong 10 phút -> khóa 15 phút)
+    lock_key = f"pin_lock:{client_ip}"
+    if await redis.exists(lock_key):
+        ttl = await redis.ttl(lock_key) if hasattr(redis, "ttl") else 900
+        raise AppError(
+            f"Địa chỉ IP tạm thời bị khóa do nhập sai mã PIN quá 10 lần. Vui lòng thử lại sau {max(1, ttl)} giây.",
+            code="PIN_BRUTE_FORCE_LOCKED",
+            status_code=429,
+        )
+
     # 1. Tra cứu game_id từ PIN
     game_id_str = await redis.get(f"pin:{pin}")
     if not game_id_str:
+        # Ghi nhận lần nhập sai của IP trong cửa sổ 10 phút (600 giây)
+        fail_key = f"pin_fail:{client_ip}"
+        if hasattr(redis, "incr"):
+            fail_count = await redis.incr(fail_key)
+        else:
+            val = int(await redis.get(fail_key) or 0) + 1
+            await redis.set(fail_key, str(val))
+            fail_count = val
+
+        if fail_count == 1 and hasattr(redis, "expire"):
+            await redis.expire(fail_key, 600)
+
+        if fail_count >= 10:
+            # Khóa tạm IP 15 phút (900 giây)
+            await redis.set(lock_key, "1", ex=900)
+            await redis.delete(fail_key)
+            raise AppError(
+                "Bạn đã nhập sai mã PIN 10 lần liên tiếp. Địa chỉ IP của bạn bị tạm khóa 15 phút để chống tấn công dò PIN.",
+                code="PIN_BRUTE_FORCE_LOCKED",
+                status_code=429,
+            )
+
         raise AppError(
             "Mã PIN không tồn tại hoặc trận đấu đã kết thúc", code="GAME_NOT_FOUND", status_code=404
         )
+
+    # Nhập đúng mã PIN hợp lệ -> Xóa bộ đếm sai
+    await redis.delete(f"pin_fail:{client_ip}")
 
     game_id = uuid.UUID(game_id_str)
 
