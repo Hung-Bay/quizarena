@@ -88,6 +88,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Thiết lập file môi trường mẫu cho CI
+        run: cp .env.example .env
+
       - name: Kiểm tra cấu hình Docker Compose
         run: docker compose config --quiet
 
