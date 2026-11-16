@@ -14,7 +14,7 @@
 | **P2** | Quiz Authoring + AI Sinh Quiz | CRUD quiz, PDF upload, Gemini Gateway, Quota rate limiter, SSE | ✅ Hoàn thành | Tuần 3 |
 | **P3** | Live Game Engine | State machine, Redis Lua atomic, Leaderboard ZSET, Game clock, Write-behind, CLI Bots | ✅ Hoàn thành | Tuần 4 |
 | **P4** | Frontend + AI Báo cáo sau trận | React FE, 1 call Gemini/game, Báo cáo cá nhân, Degraded mode | ✅ Hoàn thành | Tuần 5 |
-| **P5** | Scale Realtime & Nginx Gateway | Scale replica, Redis Pub/Sub, Loadtest 300 bots, Anti-cheat | 🚀 Đang thực hiện | Tuần 6 |
+| **P5** | Scale Realtime & Nginx Gateway | Scale replica, Redis Pub/Sub, Loadtest 300 bots, Anti-cheat | ✅ Hoàn thành | Tuần 6 |
 | **P6** | Cloud, Domain, HTTPS, CI/CD | Oracle Cloud ARM, Let's Encrypt, Deploy zero-downtime | ⏳ Chưa bắt đầu | Tuần 7 |
 | **P7** | Observability, Autoscale, Demo | Grafana, Loki, Autoscale, Backup restore, SRS v1.0, Báo cáo | ⏳ Chưa bắt đầu | Tuần 8 |
 
@@ -141,6 +141,43 @@
     - `backend/tests/test_ws_spam_disconnect.py` (3 tests): Rate limit bucket, sliding window và ngắt kết nối mã 1008 khi spam.
     - Toàn bộ test suite backend đều vượt qua.
   - **Nghiệm thu:** **Đạt 100% mục tiêu Thứ Năm**.
+
+- **Thứ Sáu (Bảo Mật Chống Gian Lận ANTI_CHEAT.md, Quyết Định Kiến Trúc ADR-004, Rà Soát 10 Vai Trò Redis & Diễn Tập Demo 15 Phút):**
+  - **Kiểm Chứng 6 Kịch Bản Chống Gian Lận Nghiệp Vụ (`docs/ANTI_CHEAT.md` & `infra/scripts/verify_anti_cheat.py`):**
+    - Viết script tự động `infra/scripts/verify_anti_cheat.py` kiểm chứng thực tế toàn bộ 6 kịch bản theo yêu cầu Đề bài (§7.11) qua Nginx Gateway:
+      - *Kịch bản 1:* Không rò rỉ trường `is_correct` trong gói tin `question.start` (chỉ gửi `id`, `position`, `content`).
+      - *Kịch bản 2:* Chống nộp bài đúp và nộp bài quá hạn qua Redis Lua script nguyên tử (`ALREADY_ANSWERED` / `QUESTION_EXPIRED`).
+      - *Kịch bản 3:* Token isolation: Guest token của Trận A mang sang Trận B bị từ chối bằng HTTP 403 `FORBIDDEN`.
+      - *Kịch bản 4:* Ngăn chặn Broken Function Level Authorization: Player gửi lệnh Host `game.next` bị từ chối với frame lỗi `FORBIDDEN` và server ghi log cảnh báo an ninh.
+      - *Kịch bản 5:* Chặn spam dồn dập (mô phỏng 100 msg/s): Token Bucket cảnh báo `RATE_LIMITED`, sau 10 lần vi phạm liên tục trong 2 giây server gửi `SPAM_DISCONNECTED` và đóng kết nối socket với mã chuẩn `1008` (Policy Violation).
+      - *Kịch bản 6:* Phân tích toán học xác suất brute-force PIN và đánh đổi với mạng NAT. Lớp 2 khóa IP 15 phút sau 10 lần sai, giảm kỳ vọng đoán trúng từ 8–9 lần/ngày xuống còn $\approx 0.0192$ lần/ngày ($\approx 52$ ngày mới trúng 1 lần). Nhập đúng PIN tự động xóa bộ đếm sai.
+    - **Kết quả:** 6/6 kịch bản đều vượt qua và bị chặn 100%.
+  - **Quyết Định Kiến Trúc Mở Rộng Quy Mô WebSocket (`docs/ADR-004-ws-scaling.md`):**
+    - Hoàn tất tài liệu ADR-004 phân tích toàn diện giữa hai phương án: **Redis Pub/Sub kết hợp Nginx `least_conn`** (Được chọn) so với **Consistent Hashing tại Gateway**.
+    - Đưa vào số liệu thực nghiệm định lượng đo đạc từ Kịch bản 3 của `docs/LOADTEST.md` (1 Replica vs 3 Replicas trên cùng 300 bots):
+      - 3 Replicas giúp giảm 21.5% RTT `answer.ack` $p_{95}$ (7.3 ms vs 9.3 ms).
+      - 3 Replicas giúp giảm 22% Broadcast delay $p_{95}$ (66.6 ms vs 85.4 ms) nhờ chia đều 300 kết nối cho 3 CPU cores vật lý xử lý song song.
+      - Giải trình hiện tượng "Scale-up không tự cân bằng lại kết nối cũ", ưu thế của thuật toán `least_conn` so với `round_robin` đối với kết nối dài, và vai trò của Randomized Jitter chống bão kết nối (Thundering Herd).
+  - **Cập Nhật Yêu Cầu Phi Chức Năng Định Lượng (`docs/SRS.md` mục 5):**
+    - Hoàn thiện bảng mục 5 với đầy đủ con số đo lường thực tế định lượng cho mọi chỉ tiêu (NF-1 đến NF-10, NFR-SEC-01..05, NFR-RES-01).
+    - Cập nhật số liệu kích thước Docker image thực tế (Backend content size 73.1 MB, Frontend 21.1 MB, multi-arch amd64+arm64).
+  - **Rà Soát & Xác Thực Đủ 10 Vai Trò của Redis trong Hệ Thống (§7.6):**
+    - 1. *Game State:* Hash `game:{id}:state` + Lua scripts atomic.
+    - 2. *Leaderboard:* Sorted Set (ZSET) `game:{id}:lb` tính hạng tức thì $O(\log N)$.
+    - 3. *Idempotency Guard:* Set `game:{id}:q:{n}:answered` chống trả lời 2 lần.
+    - 4. *Cross-replica Broadcast:* Pub/Sub channel `game:{id}` liên lạc đa replica.
+    - 5. *Write-Behind Buffer:* Redis Stream `game:{id}:answers` đệm ghi bất đồng bộ.
+    - 6. *Job Queue:* ARQ task runner tạo báo cáo sau trận.
+    - 7. *Rate Limiter:* Token Bucket Lua script giới hạn 5 msg/s và khóa IP dò PIN.
+    - 8. *Auth Security:* Denylist JWT `deny:jti:*`, bộ đếm login sai, vé 1-time `ws:ticket:*`.
+    - 9. *Cache-aside:* Snapshot quiz trong trận và microcache public quiz.
+    - 10. *Presence & Heartbeat:* Theo dõi người chơi online/offline qua Hash và TTL.
+  - **Kịch Bản Diễn Tập Demo 15 Phút & Sổ Tay Vấn Đáp (`docs/DEMO_PHASE_5.md`):**
+    - Xây dựng timeline chi tiết từng phút cho buổi nghiệm thu 15 phút bao phủ đầy đủ toàn bộ 8 tiêu chí Bắt buộc và 1 tiêu chí Nên có.
+    - Biên soạn bộ câu hỏi và câu trả lời mẫu cho 10 câu hỏi vấn đáp kỹ thuật chuyên sâu của Mentor.
+  - **Nghiệm Thu Toàn Diện Phase 5:**
+    - Hoàn thành **100% các tiêu chí của Phase 5** (8/8 tiêu chí Bắt buộc + 1/1 tiêu chí Nên có).
+    - Toàn bộ tài liệu, script kiểm thử và báo cáo đã sẵn sàng cho buổi nghiệm thu cuối tuần.
 
 ---
 
