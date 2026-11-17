@@ -7,6 +7,8 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.config import get_settings
+
 log = logging.getLogger("app.health")
 router = APIRouter(tags=["health"])
 
@@ -52,3 +54,14 @@ async def readyz(request: Request) -> JSONResponse:
         {"status": "ready" if ready else "unavailable", "checks": checks},
         status_code=200 if ready else 503,
     )
+
+
+@router.get("/version")
+async def version() -> dict[str, str]:
+    """Phiên bản và Git commit SHA đang chạy (dùng cho smoke test và rollback)."""
+    settings = get_settings()
+    return {
+        "version": settings.app_version,
+        "commit_sha": settings.commit_sha,
+        "app_env": settings.app_env,
+    }

@@ -1,0 +1,88 @@
+name: Build and Push Multi-arch Images to GHCR
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    name: Build & Push (amd64 + arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mã nguồn
+        uses: actions/checkout@v7
+
+      - name: Chuẩn hóa tên repository thành chữ thường
+        run: |
+          echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Cài đặt QEMU cho multi-arch build
+        uses: docker/setup-qemu-action@v3
+
+      - name: Cài đặt Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Đăng nhập vào GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ----------------------------------------------------------------------
+      # 1. Backend Image (Phục vụ API, Realtime WebSocket và Worker)
+      # ----------------------------------------------------------------------
+      - name: Docker metadata (Backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/backend
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push Backend Multi-arch Image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            COMMIT_SHA=${{ github.sha }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      # ----------------------------------------------------------------------
+      # 2. Frontend Web Image (Phục vụ Static SPA Vite)
+      # ----------------------------------------------------------------------
+      - name: Docker metadata (Frontend Web)
+        id: meta-web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/web
+          tags: |
+            type=sha,format=long,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build & Push Web Multi-arch Image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web

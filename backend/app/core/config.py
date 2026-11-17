@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     # --- Chung ---
     app_env: Literal["dev", "test", "prod"] = "dev"
+    app_version: str = "0.1.0"
+    commit_sha: str = "unknown"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # --- Kết nối dữ liệu ---

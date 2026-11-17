@@ -39,3 +39,17 @@ def test_readyz_voi_postgres_redis_that(client):
         pytest.skip("Postgres/Redis chưa chạy (đặt REQUIRE_SERVICES=1 để bắt buộc)")
     assert r.status_code == 200
     assert r.json()["checks"] == {"postgres": "ok", "redis": "ok"}
+
+
+def test_version_endpoint(client):
+    r = client.get("/api/v1/version")
+    assert r.status_code == 200
+    body = r.json()
+    assert "version" in body
+    assert "commit_sha" in body
+    assert "app_env" in body
+
+    # Alias /version
+    r_alias = client.get("/version")
+    assert r_alias.status_code == 200
+    assert r_alias.json() == body

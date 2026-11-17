@@ -94,6 +94,9 @@ jobs:
       - name: Kiểm tra cấu hình Docker Compose
         run: docker compose config --quiet
 
+      - name: Kiểm tra an toàn cổng Docker Compose (chỉ Nginx publish ports)
+        run: python infra/scripts/verify_compose_ports.py
+
       - name: Kiểm tra cú pháp Nginx bằng image thật (nginx -t)
         run: |
           docker run --rm \
