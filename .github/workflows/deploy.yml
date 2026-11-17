@@ -1,0 +1,329 @@
+name: Deploy to Production & Smoke Test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Hành động cần thực thi (deploy hoặc rollback)'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - rollback
+      target_sha:
+        description: 'Commit SHA mục tiêu (bỏ trống nếu muốn dùng commit mới nhất)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+# Hai đợt deploy không bao giờ chạy chồng lên nhau và không được ngắt giữa chừng
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 1. Chuẩn bị tham số và Commit SHA
+  # --------------------------------------------------------------------------
+  prepare:
+    name: Xác định biến triển khai
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.vars.outputs.action }}
+      target_sha: ${{ steps.vars.outputs.target_sha }}
+      rollback_sha: ${{ steps.vars.outputs.rollback_sha }}
+      image_prefix: ${{ steps.vars.outputs.image_prefix }}
+    steps:
+      - name: Checkout mã nguồn
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 10
+
+      - name: Tính toán thông tin mục tiêu
+        id: vars
+        run: |
+          ACTION="${{ github.event.inputs.action || 'deploy' }}"
+          INPUT_SHA="${{ github.event.inputs.target_sha }}"
+          if [ -n "$INPUT_SHA" ]; then
+            TARGET_SHA="$INPUT_SHA"
+          else
+            TARGET_SHA="${{ github.sha }}"
+          fi
+
+          # Tìm commit trước đó để chuẩn bị cho rollback nếu smoke test thất bại
+          BEFORE_SHA="${{ github.event.before }}"
+          if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            PREV_SHA=$(git rev-parse HEAD~1 2>/dev/null || echo "$TARGET_SHA")
+          else
+            PREV_SHA="$BEFORE_SHA"
+          fi
+
+          echo "action=$ACTION" >> $GITHUB_OUTPUT
+          echo "target_sha=$TARGET_SHA" >> $GITHUB_OUTPUT
+          echo "rollback_sha=$PREV_SHA" >> $GITHUB_OUTPUT
+          echo "image_prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+
+  # --------------------------------------------------------------------------
+  # 2. Build multi-arch images và đẩy lên GHCR
+  # --------------------------------------------------------------------------
+  build:
+    name: Build & Push Images (Multi-arch)
+    needs: prepare
+    if: needs.prepare.outputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mã nguồn
+        uses: actions/checkout@v7
+
+      - name: Cài đặt QEMU cho multi-arch build
+        uses: docker/setup-qemu-action@v3
+
+      - name: Cài đặt Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Đăng nhập vào GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push Backend Multi-arch Image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            COMMIT_SHA=${{ needs.prepare.outputs.target_sha }}
+          tags: |
+            ${{ needs.prepare.outputs.image_prefix }}/backend:${{ needs.prepare.outputs.target_sha }}
+            ${{ needs.prepare.outputs.image_prefix }}/backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build & Push Frontend Web Multi-arch Image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.image_prefix }}/web:${{ needs.prepare.outputs.target_sha }}
+            ${{ needs.prepare.outputs.image_prefix }}/web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+  # --------------------------------------------------------------------------
+  # 3. Triển khai Rolling Update trên máy chủ qua SSH Deploy Wrapper
+  # --------------------------------------------------------------------------
+  deploy:
+    name: Deploy lên Production VM
+    needs: [prepare, build]
+    if: always() && (needs.build.result == 'success' || (needs.prepare.outputs.action == 'rollback' && needs.build.result == 'skipped'))
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ vars.DOMAIN || secrets.VM_HOST }}
+    outputs:
+      target_sha: ${{ needs.prepare.outputs.target_sha }}
+    steps:
+      - name: Cấu hình SSH Client (Ghim known_hosts chống MITM)
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Thực thi Deploy Wrapper qua SSH
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          DEPLOY_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+          ACTION: ${{ needs.prepare.outputs.action }}
+        run: |
+          echo "Triển khai lệnh '$ACTION $TARGET_SHA' tới $DEPLOY_USER@$VM_HOST..."
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes -T "$DEPLOY_USER@$VM_HOST" "$ACTION $TARGET_SHA"
+
+  # --------------------------------------------------------------------------
+  # 4. Smoke Test từ bên ngoài qua URL công khai (DNS, TLS, Nginx, REST, 1 Bot WebSocket)
+  # --------------------------------------------------------------------------
+  smoke-test:
+    name: Smoke Test & Xác thực Toàn diện
+    needs: [prepare, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mã nguồn
+        uses: actions/checkout@v7
+
+      - name: Cài đặt Python uv
+        uses: astral-sh/setup-uv@v10.3.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Cài đặt thư viện backend
+        run: |
+          cd backend
+          uv sync --frozen
+
+      - name: Thực thi quizarena smoke
+        env:
+          DOMAIN: ${{ vars.DOMAIN || secrets.VM_HOST }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+          HOST_EMAIL: ${{ secrets.SMOKE_HOST_EMAIL || 'admin@quizarena.io.vn' }}
+          HOST_PASS: ${{ secrets.SMOKE_HOST_PASSWORD || 'AdminPass123456!' }}
+        run: |
+          cd backend
+          if [ -n "${{ vars.DOMAIN }}" ]; then
+            TARGET_URL="https://${{ vars.DOMAIN }}"
+          else
+            TARGET_URL="http://${{ secrets.VM_HOST }}"
+          fi
+          echo "Chạy smoke test tới $TARGET_URL với commit SHA kỳ vọng: $TARGET_SHA"
+          uv run quizarena smoke \
+            --url "$TARGET_URL" \
+            --sha "$TARGET_SHA" \
+            --email "$HOST_EMAIL" \
+            --password "$HOST_PASS" \
+            --timeout 60
+
+  # --------------------------------------------------------------------------
+  # 5. Tự động Rollback khi Smoke Test thất bại
+  # --------------------------------------------------------------------------
+  rollback:
+    name: Tự động Rollback khi Smoke Test lỗi
+    needs: [prepare, deploy, smoke-test]
+    if: failure() && needs.deploy.result == 'success' && needs.prepare.outputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Cấu hình SSH Client
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Kích hoạt Rollback về SHA trước đó
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          DEPLOY_USER: ${{ secrets.SSH_USER || 'deploy' }}
+          ROLLBACK_SHA: ${{ needs.prepare.outputs.rollback_sha }}
+        run: |
+          echo "Smoke test thất bại! Đang tự động rollback về commit $ROLLBACK_SHA..."
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes -T "$DEPLOY_USER@$VM_HOST" "rollback $ROLLBACK_SHA"
+
+      - name: Xác nhận phiên bản hoạt động sau khi Rollback
+        env:
+          DOMAIN: ${{ vars.DOMAIN || secrets.VM_HOST }}
+          ROLLBACK_SHA: ${{ needs.prepare.outputs.rollback_sha }}
+        run: |
+          if [ -n "${{ vars.DOMAIN }}" ]; then
+            TARGET_URL="https://${{ vars.DOMAIN }}"
+          else
+            TARGET_URL="http://${{ secrets.VM_HOST }}"
+          fi
+          echo "Kiểm tra /api/v1/version trên $TARGET_URL..."
+          RESP=$(curl -sSf "$TARGET_URL/api/v1/version" || echo '{"commit_sha":"unknown"}')
+          echo "Phản hồi sau rollback: $RESP"
+          if echo "$RESP" | grep -q "$ROLLBACK_SHA"; then
+            echo "✓ Rollback đã khôi phục thành công phiên bản $ROLLBACK_SHA!"
+          else
+            echo "CẢNH BÁO: Kiểm tra lại phiên bản sau khi rollback."
+          fi
+
+  # --------------------------------------------------------------------------
+  # 6. Thông báo kết quả qua Discord / Telegram
+  # --------------------------------------------------------------------------
+  notify:
+    name: Báo cáo kết quả (Discord / Telegram)
+    needs: [prepare, deploy, smoke-test, rollback]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gửi thông báo Discord Webhook
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SMOKE_RESULT: ${{ needs.smoke-test.result }}
+          ROLLBACK_RESULT: ${{ needs.rollback.result || 'none' }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+          ACTION: ${{ needs.prepare.outputs.action }}
+          DOMAIN: ${{ vars.DOMAIN || secrets.VM_HOST }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK_URL không được cung cấp, bỏ qua."
+            exit 0
+          fi
+
+          if [ "$SMOKE_RESULT" = "success" ]; then
+            STATUS="TRIỂN KHAI THÀNH CÔNG"
+            COLOR=3066993 # Green
+          elif [ "$ROLLBACK_RESULT" = "success" ]; then
+            STATUS="ĐÃ TỰ ĐỘNG ROLLBACK"
+            COLOR=15105570 # Orange
+          else
+            STATUS="TRIỂN KHAI THẤT BẠI"
+            COLOR=15158332 # Red
+          fi
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "embeds": [
+              {
+                "title": "🚀 QuizArena CI/CD: $STATUS",
+                "color": $COLOR,
+                "fields": [
+                  {"name": "Hành động", "value": "$ACTION", "inline": true},
+                  {"name": "Commit SHA", "value": "\`$TARGET_SHA\`", "inline": true},
+                  {"name": "Môi trường", "value": "https://$DOMAIN", "inline": true},
+                  {"name": "Smoke Test", "value": "$SMOKE_RESULT", "inline": true},
+                  {"name": "Rollback", "value": "$ROLLBACK_RESULT", "inline": true}
+                ],
+                "footer": {"text": "QuizArena Automated Production Pipeline"}
+              }
+            ]
+          }
+          EOF
+          )
+          curl -s -H "Content-Type: application/json" -X POST -d "$PAYLOAD" "$DISCORD_WEBHOOK" || true
+
+      - name: Gửi thông báo Telegram Bot
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMOKE_RESULT: ${{ needs.smoke-test.result }}
+          ROLLBACK_RESULT: ${{ needs.rollback.result || 'none' }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+          DOMAIN: ${{ vars.DOMAIN || secrets.VM_HOST }}
+        run: |
+          if [ -z "$TELEGRAM_TOKEN" ] || [ -z "$TELEGRAM_CHAT" ]; then
+            echo "Telegram secret không được cung cấp, bỏ qua."
+            exit 0
+          fi
+
+          if [ "$SMOKE_RESULT" = "success" ]; then
+            ICON="✅"
+            STATUS="TRIỂN KHAI THÀNH CÔNG"
+          elif [ "$ROLLBACK_RESULT" = "success" ]; then
+            ICON="⚠️"
+            STATUS="ĐÃ TỰ ĐỘNG ROLLBACK"
+          else
+            ICON="❌"
+            STATUS="TRIỂN KHAI THẤT BẠI"
+          fi
+
+          TEXT="$ICON *QuizArena CI/CD: $STATUS*%0A• *Commit:* \`$TARGET_SHA\`%0A• *Host:* https://$DOMAIN%0A• *Smoke Test:* \`$SMOKE_RESULT\`%0A• *Rollback:* \`$ROLLBACK_RESULT\`"
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendMessage" \
+            -d "chat_id=$TELEGRAM_CHAT&text=$TEXT&parse_mode=Markdown" || true

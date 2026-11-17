@@ -70,6 +70,12 @@ echo "Đang kiểm tra endpoint /api/v1/version trên localhost..."
 ACTIVE_VERSION=$(curl -sSf http://127.0.0.1/api/v1/version || echo '{"commit_sha":"unknown"}')
 echo "Phiên bản phản hồi từ hệ thống: $ACTIVE_VERSION"
 
+if echo "$ACTIVE_VERSION" | grep -q "$TARGET_SHA"; then
+  echo "✓ Xác nhận: Hệ thống đang phục vụ đúng phiên bản $TARGET_SHA."
+else
+  echo "CẢNH BÁO: Chưa thấy commit SHA $TARGET_SHA trong /api/v1/version (có thể replica đang khởi động)."
+fi
+
 echo "======================================================================"
 echo "  DEPLOY HOÀN TẤT THÀNH CÔNG CHO PHIÊN BẢN $TARGET_SHA"
 echo "======================================================================"

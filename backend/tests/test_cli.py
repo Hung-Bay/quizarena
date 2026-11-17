@@ -13,6 +13,65 @@ def test_help_liet_ke_lenh_seed():
     assert result.exit_code == 0
     assert "seed" in result.output
     assert "create-admin" in result.output
+    assert "smoke" in result.output
+
+
+def test_smoke_help_hien_thi_day_du_tham_so():
+    result = runner.invoke(app, ["smoke", "--help"])
+    assert result.exit_code == 0
+    assert "--url" in result.output
+    assert "--sha" in result.output
+    assert "--email" in result.output
+    assert "--password" in result.output
+    assert "--timeout" in result.output
+
+
+def test_smoke_thanh_cong_khi_runner_tra_ve_true(monkeypatch):
+    from app.game.smoke_runner import SmokeStepResult, SmokeTestReport
+
+    async def mock_run(self):
+        return SmokeTestReport(
+            success=True,
+            steps=[
+                SmokeStepResult("Kiểm tra DNS & TLS", True, 12.3),
+                SmokeStepResult("GET /api/v1/version", True, 8.5),
+                SmokeStepResult("1 Bot chơi qua WebSocket", True, 250.0),
+            ],
+            active_version="1.0.0",
+            active_sha="a1b2c3d4e5f6",
+            active_env="production",
+            total_duration_s=0.27,
+        )
+
+    monkeypatch.setattr("app.game.smoke_runner.SmokeTestRunner.run", mock_run)
+    result = runner.invoke(app, ["smoke", "--url", "http://testserver", "--sha", "a1b2c3d4e5f6"])
+    assert result.exit_code == 0
+    assert "QUIZARENA SMOKE TEST RUNNER" in result.output
+    assert "SMOKE TEST THÀNH CÔNG RỰC RỠ" in result.output
+    assert "a1b2c3d4e5f6" in result.output
+
+
+def test_smoke_that_bai_khi_runner_tra_ve_false(monkeypatch):
+    from app.game.smoke_runner import SmokeStepResult, SmokeTestReport
+
+    async def mock_run(self):
+        return SmokeTestReport(
+            success=False,
+            steps=[
+                SmokeStepResult("Kiểm tra DNS & TLS", True, 10.0),
+                SmokeStepResult("GET /api/v1/version", False, 15.0, "SHA mismatch"),
+            ],
+            active_version="1.0.0",
+            active_sha="wrong_sha",
+            active_env="production",
+            error="Version SHA mismatch: expected=target_sha actual=wrong_sha",
+            total_duration_s=0.03,
+        )
+
+    monkeypatch.setattr("app.game.smoke_runner.SmokeTestRunner.run", mock_run)
+    result = runner.invoke(app, ["smoke", "--url", "http://testserver", "--sha", "target_sha"])
+    assert result.exit_code == 1
+    assert "SMOKE TEST THẤT BẠI" in result.output
 
 
 def test_create_admin_mat_khau_yeu_bi_tu_choi():

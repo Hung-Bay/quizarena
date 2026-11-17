@@ -105,15 +105,15 @@ touch "$DEPLOY_HOME/.ssh/authorized_keys"
 chmod 600 "$DEPLOY_HOME/.ssh/authorized_keys"
 
 # Tạo wrapper kiểm tra an toàn lệnh deploy cho SSH key của GitHub Actions
-cat << 'EOF' > "$DEPLOY_HOME/deploy_wrapper.sh"
+if [ -f "/opt/quizarena/infra/scripts/deploy_wrapper.sh" ]; then
+  cp "/opt/quizarena/infra/scripts/deploy_wrapper.sh" "$DEPLOY_HOME/deploy_wrapper.sh"
+else
+  cat << 'EOF' > "$DEPLOY_HOME/deploy_wrapper.sh"
 #!/usr/bin/env bash
 set -euo pipefail
 
 # Wrapper giới hạn lệnh thực thi từ SSH key của CI/CD
-# Chỉ cho phép chạy deploy.sh kèm Commit SHA (hex 7-40 ký tự) hoặc status
 ORIGINAL_CMD="${SSH_ORIGINAL_COMMAND:-status}"
-
-# Loại bỏ khoảng trắng thừa
 CMD_CLEAN=$(echo "$ORIGINAL_CMD" | xargs)
 
 if [[ "$CMD_CLEAN" =~ ^deploy\ ([a-f0-9]{7,40})$ ]]; then
@@ -122,7 +122,7 @@ if [[ "$CMD_CLEAN" =~ ^deploy\ ([a-f0-9]{7,40})$ ]]; then
   exec /opt/quizarena/infra/scripts/deploy.sh "$COMMIT_SHA"
 elif [[ "$CMD_CLEAN" == "status" ]]; then
   cd /opt/quizarena
-  exec docker compose ps
+  exec docker compose -f docker-compose.yml ps
 elif [[ "$CMD_CLEAN" =~ ^rollback\ ([a-f0-9]{7,40})$ ]]; then
   COMMIT_SHA="${BASH_REMATCH[1]}"
   echo "Xác thực lệnh rollback hợp lệ cho SHA: $COMMIT_SHA"
@@ -132,10 +132,11 @@ elif [[ "$CMD_CLEAN" =~ ^renew(\ --dry-run)?$ ]]; then
   exec /opt/quizarena/infra/scripts/renew_ssl.sh ${BASH_REMATCH[1]:-}
 else
   echo "LỖI AN NINH: Lệnh '$ORIGINAL_CMD' bị từ chối bởi QuizArena Deploy Wrapper!" >&2
-  echo "Chỉ chấp nhận: 'deploy <sha>', 'rollback <sha>', hoặc 'status'." >&2
+  echo "Chỉ chấp nhận: 'deploy <sha>', 'rollback <sha>', 'status', hoặc 'renew [--dry-run]'." >&2
   exit 1
 fi
 EOF
+fi
 
 chmod +x "$DEPLOY_HOME/deploy_wrapper.sh"
 chown -R deploy:deploy "$DEPLOY_HOME"
