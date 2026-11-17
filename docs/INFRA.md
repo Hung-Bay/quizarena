@@ -185,3 +185,54 @@ Kết quả phản hồi hợp lệ:
 ```json
 {"version":"0.1.0","commit_sha":"unknown","app_env":"prod"}
 ```
+
+---
+
+## 6. Triển Khai HTTPS, ACME Webroot & Chứng Chỉ Let's Encrypt (Phase 6)
+
+### 6.1. Kiến Trúc Cấp Phát & Tải Chứng Chỉ
+- **Giao thức ACME Webroot:** Dùng container Docker `certbot/certbot:v2.11.0` đọc/ghi thử thách vào volume chung `certbot_www` (`/var/www/certbot`). Gateway Nginx phục vụ đường dẫn `location /.well-known/acme-challenge/` trên cổng 80 mà không cần chuyển tiếp sang HTTPS.
+- **Quy trình Bootstrap an toàn:**
+  - Để tránh Nginx bị crash khi chưa có chứng chỉ Let's Encrypt, script `infra/scripts/generate_dummy_cert.py` tự động sinh chứng chỉ tự ký (self-signed) vào thư mục `/etc/letsencrypt/live/quizarena/` trước khi Nginx khởi động lần đầu.
+  - Sau khi Nginx lắng nghe thành công trên cổng 80, Certbot chạy để xin chứng chỉ thật.
+  - Khi đã có chứng chỉ thật, Nginx chỉ cần reload (`nginx -s reload`), toàn bộ lưu lượng chuyển tiếp sang chứng chỉ Let's Encrypt hợp lệ mà không làm rớt các kết nối WebSocket đang hoạt động.
+
+### 6.2. Cấu Hình Bảo Mật SSL/TLS (Chuẩn SSL Labs Hạng A)
+- **Giao thức hỗ trợ:** Chỉ cho phép `TLSv1.2` và `TLSv1.3`. Vô hiệu hóa hoàn toàn SSLv3, TLS 1.0, TLS 1.1.
+- **Bộ mã hóa (Cipher Suites):** Sử dụng các bộ mã hóa mạnh mẽ hỗ trợ Forward Secrecy (ECDHE) và xác thực an toàn:
+  ```nginx
+  ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+  ssl_prefer_server_ciphers off;
+  ```
+- **Session Cache:** `shared:SSL:10m` giúp giảm tải handshake cho các client kết nối lại thường xuyên mà không dùng session tickets kém an toàn (`ssl_session_tickets off`).
+- **OCSP Stapling:** Đặt `ssl_stapling off;` theo đúng khuyến nghị của Let's Encrypt (tổ chức này đã ngừng dịch vụ OCSP vì lý do quyền riêng tư và hiệu năng, chuyển sang dùng CRLs).
+- **HSTS Ngắn Hạn:** Sử dụng `max-age=86400` (1 ngày) và chưa bật `includeSubDomains`/`preload` để tránh rủi ro khóa cứng người dùng ra ngoài nếu có sai sót cấu hình ban đầu.
+
+### 6.3. Quy Trình Cấp Chứng Chỉ & Gia Hạn
+1. **Chạy cấp chứng chỉ lần đầu:**
+   ```bash
+   # Bước 1: Thử nghiệm với môi trường Staging (tránh rate limit)
+   ./infra/scripts/init_ssl.sh <DOMAIN> <EMAIL> --staging
+
+   # Bước 2: Cấp chứng chỉ thật từ Let's Encrypt Production
+   ./infra/scripts/init_ssl.sh <DOMAIN> <EMAIL>
+   ```
+2. **Kiểm tra tính năng gia hạn (Tiêu chí bắt buộc):**
+   ```bash
+   ./infra/scripts/renew_ssl.sh --dry-run
+   ```
+   Lệnh phải kết thúc với mã thoát `0` và thông báo `Simulated renewal of all certificates succeeded`.
+3. **Tự động hóa bằng systemd timer trên VM:**
+   - Script `setup_vm.sh` cấu hình timer `quizarena-certbot-renew.timer` chạy định kỳ 2 lần mỗi ngày (03:00 và 15:00 UTC) kèm độ trễ ngẫu nhiên (`RandomizedDelaySec=3600`) để gia hạn chứng chỉ tự động 30 ngày trước khi hết hạn.
+
+### 6.4. Kịch Bản Diễn Tập Quét Mã QR Trên Điện Thoại 4G
+1. Host tạo trận đấu trên máy tính tại `https://<domain>/host/game/<id>`.
+2. Màn hình hiển thị mã PIN lớn và mã QR Code được sinh tự động theo URL:
+   `https://<domain>/join?pin=<PIN>`
+3. Dùng điện thoại kết nối mạng di động 4G/5G (hoàn toàn ngoài mạng nội bộ của máy chủ):
+   - Quét mã QR bằng ứng dụng camera hoặc Zalo.
+   - Trình duyệt điện thoại mở ra trang `https://<domain>/join?pin=<PIN>`.
+   - Trình duyệt xác nhận chứng chỉ TLS hợp lệ (ổ khóa xanh, không có cảnh báo bảo mật).
+   - Nhập biệt danh người chơi và bấm "Tham Gia".
+   - Kết nối WebSocket tự động nâng cấp giao thức `wss://<domain>/ws/game?ticket=...` thành công.
+   - Thử trả lời 1 câu hỏi trên điện thoại, Host nhận được điểm và bảng xếp hạng cập nhật ngay lập tức.

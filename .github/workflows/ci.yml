@@ -97,10 +97,24 @@ jobs:
       - name: Kiểm tra an toàn cổng Docker Compose (chỉ Nginx publish ports)
         run: python infra/scripts/verify_compose_ports.py
 
+      - name: Tạo chứng chỉ giả lập cho kiểm tra Nginx SSL
+        run: |
+          mkdir -p /tmp/letsencrypt/live/quizarena
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout /tmp/letsencrypt/live/quizarena/privkey.pem \
+            -out /tmp/letsencrypt/live/quizarena/fullchain.pem \
+            -subj "/CN=localhost"
+
       - name: Kiểm tra cú pháp Nginx bằng image thật (nginx -t)
         run: |
+          # Kiểm tra cấu hình Production HTTPS
           docker run --rm \
             -v "${{ github.workspace }}/infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            -v /tmp/letsencrypt:/etc/letsencrypt:ro \
+            nginx:1.27-alpine nginx -t
+          # Kiểm tra cấu hình Bootstrap HTTP ACME
+          docker run --rm \
+            -v "${{ github.workspace }}/infra/nginx/nginx-bootstrap.conf:/etc/nginx/nginx.conf:ro" \
             nginx:1.27-alpine nginx -t
 
       - name: Build backend image và kiểm tra kích thước < 250 MB (NF-9)

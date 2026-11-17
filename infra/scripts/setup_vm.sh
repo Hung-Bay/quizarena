@@ -127,6 +127,9 @@ elif [[ "$CMD_CLEAN" =~ ^rollback\ ([a-f0-9]{7,40})$ ]]; then
   COMMIT_SHA="${BASH_REMATCH[1]}"
   echo "Xác thực lệnh rollback hợp lệ cho SHA: $COMMIT_SHA"
   exec /opt/quizarena/infra/scripts/deploy.sh "$COMMIT_SHA"
+elif [[ "$CMD_CLEAN" =~ ^renew(\ --dry-run)?$ ]]; then
+  cd /opt/quizarena
+  exec /opt/quizarena/infra/scripts/renew_ssl.sh ${BASH_REMATCH[1]:-}
 else
   echo "LỖI AN NINH: Lệnh '$ORIGINAL_CMD' bị từ chối bởi QuizArena Deploy Wrapper!" >&2
   echo "Chỉ chấp nhận: 'deploy <sha>', 'rollback <sha>', hoặc 'status'." >&2
@@ -137,9 +140,40 @@ EOF
 chmod +x "$DEPLOY_HOME/deploy_wrapper.sh"
 chown -R deploy:deploy "$DEPLOY_HOME"
 
-echo ">>> [7/7] Thiết lập thư mục ứng dụng /opt/quizarena..."
+echo ">>> [7/8] Thiết lập thư mục ứng dụng /opt/quizarena..."
 mkdir -p /opt/quizarena
 chown -R deploy:deploy /opt/quizarena
+
+echo ">>> [8/8] Cấu hình systemd timer tự động gia hạn SSL (renew_ssl.sh)..."
+cat << 'EOF' > /etc/systemd/system/quizarena-certbot-renew.service
+[Unit]
+Description=QuizArena Certbot Certificate Renewal
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/quizarena
+ExecStart=/opt/quizarena/infra/scripts/renew_ssl.sh
+EOF
+
+cat << 'EOF' > /etc/systemd/system/quizarena-certbot-renew.timer
+[Unit]
+Description=Run QuizArena Certbot Renewal twice daily
+Documentation=https://eff-certbot.readthedocs.io/
+
+[Timer]
+OnCalendar=*-*-* 03,15:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload || true
+systemctl enable --now quizarena-certbot-renew.timer || true
 
 echo "======================================================================"
 echo "  HOÀN TẤT THIẾT LẬP MÁY CHỦ PRODUCTION (PHASE 6)"
