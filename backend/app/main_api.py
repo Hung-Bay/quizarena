@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 
 from app.api.v1 import admin, ai_jobs, auth, games, health, quizzes, realtime
 from app.core.app_factory import create_app
+from app.core.config import get_settings
 from app.core.db import create_engine, create_session_factory
 from app.core.metrics import metrics_endpoint_response
 from app.core.redis import create_redis
@@ -42,6 +43,17 @@ app.include_router(admin.router, prefix="/api/v1")
 async def readyz() -> dict[str, str]:
     """Readiness probe cho API gateway."""
     return {"status": "ready"}
+
+
+@app.get("/version")
+async def version() -> dict[str, str]:
+    """Phiên bản và Git commit SHA đang chạy (dùng cho smoke test và rollback)."""
+    settings = get_settings()
+    return {
+        "version": settings.app_version,
+        "commit_sha": settings.commit_sha,
+        "app_env": settings.app_env,
+    }
 
 
 @app.get("/internal/auth/verify")

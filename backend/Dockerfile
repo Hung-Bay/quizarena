@@ -30,8 +30,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
+ARG COMMIT_SHA=unknown
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    COMMIT_SHA=${COMMIT_SHA} \
     PATH="/app/.venv/bin:${PATH}"
 
 # User không phải root (uid cố định để dễ phân quyền volume về sau)
