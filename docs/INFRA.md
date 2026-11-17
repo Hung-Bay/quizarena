@@ -338,7 +338,7 @@ WantedBy=multi-user.target
 - Quản trị viên không cần truy cập SSH để khởi động lại dịch vụ bằng tay.
 
 ### 8.2. Quét Lỗ Hổng Bảo Mật Container Với Trivy
-Trong cả hai pipeline CI ([.github/workflows/ci.yml](file:///d:/CodingProject/Python/quizarena/.github/workflows/ci.yml)) và CD ([.github/workflows/deploy.yml](file:///d:/CodingProject/Python/quizarena/.github/workflows/deploy.yml)), action `aquasecurity/trivy-action@0.29.0` được kích hoạt ngay sau khi build image:
+Trong cả hai pipeline CI ([.github/workflows/ci.yml](file:///d:/CodingProject/Python/quizarena/.github/workflows/ci.yml)) và CD ([.github/workflows/deploy.yml](file:///d:/CodingProject/Python/quizarena/.github/workflows/deploy.yml)), action `aquasecurity/trivy-action@v0.29.0` được kích hoạt ngay sau khi build image:
 - **Phạm vi quét:** Hệ điều hành nền (`os`) và các thư viện phụ thuộc (`library`).
 - **Mức độ rủi ro:** Lọc các lỗ hổng mức `CRITICAL` và `HIGH`.
 - **Cờ kiểm soát:** `ignore-unfixed: true` để tránh cảnh báo sai đối với các CVE upstream chưa có bản vá từ nhà cung cấp hệ điều hành (Alpine Linux / Debian).
