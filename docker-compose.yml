@@ -146,8 +146,11 @@ services:
     restart: unless-stopped
     ports:
       - "${HTTP_PORT:-80}:80"   # cổng duy nhất của hệ thống mở ra ngoài
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - certbot_etc:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
     depends_on:
       api:      { condition: service_healthy }
       realtime: { condition: service_healthy }
@@ -162,6 +165,16 @@ services:
       resources:
         limits:
           memory: 64M
+    logging: *default-logging
+
+  # ------------------------------------------------------------- ACME / Let's Encrypt
+  certbot:
+    image: certbot/certbot:v2.11.0
+    restart: "no"
+    volumes:
+      - certbot_etc:/etc/letsencrypt
+      - certbot_var:/var/lib/letsencrypt
+      - certbot_www:/var/www/certbot
     logging: *default-logging
 
   # ------------------------------------------------------------- Giám sát (Profile: monitoring)
@@ -220,3 +233,6 @@ volumes:
   uploads:
   promdata:
   grafanadata:
+  certbot_etc:
+  certbot_var:
+  certbot_www:

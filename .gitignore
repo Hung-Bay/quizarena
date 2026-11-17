@@ -3,6 +3,7 @@
 *.pem
 *.key
 secrets/
+infra/nginx/dummy_certs/
 
 # Python
 __pycache__/

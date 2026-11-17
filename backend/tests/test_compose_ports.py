@@ -53,3 +53,29 @@ def test_verify_compose_ports_detects_exposed_redis():
     assert len(violations) == 1
     assert "redis" in violations[0]
     assert "LỖI ĐIỂM LIỆT" in violations[0]
+
+
+def test_verify_compose_ports_detects_exposed_certbot():
+    """Kiểm tra logic validator bắt được khi certbot vô tình bị mở ports."""
+    fake_compose = {
+        "services": {
+            "nginx": {"ports": ["80:80", "443:443"]},
+            "certbot": {"ports": ["8080:8080"]},
+        }
+    }
+    violations = verify_compose_ports(fake_compose)
+    assert len(violations) == 1
+    assert "certbot" in violations[0]
+    assert "LỖI ĐIỂM LIỆT" in violations[0]
+
+
+def test_verify_compose_ports_detects_unsafe_nginx_port():
+    """Kiểm tra logic validator bắt được khi Nginx publish cổng lạ ngoài 80 và 443."""
+    fake_compose = {
+        "services": {
+            "nginx": {"ports": ["80:80", "8888:8888"]},
+        }
+    }
+    violations = verify_compose_ports(fake_compose)
+    assert len(violations) == 1
+    assert "8888" in violations[0]
