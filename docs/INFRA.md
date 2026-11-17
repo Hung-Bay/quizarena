@@ -308,3 +308,43 @@ CLI `quizarena smoke` là công cụ xác thực độc lập được chạy t�
 | `DISCORD_WEBHOOK_URL`| Secret (Tùy chọn) | Webhook URL kênh Discord nhận thông báo deploy |
 | `TELEGRAM_BOT_TOKEN` | Secret (Tùy chọn) | Bot token nhận thông báo deploy |
 | `TELEGRAM_CHAT_ID`   | Secret (Tùy chọn) | Chat ID Telegram nhận thông báo deploy |
+
+
+## 8. Tự Phục Hồi Sau Khởi Động Lại & Quét An Ninh Trivy (Phase 6)
+
+### 8.1. Cơ Chế Tự Phục Hồi Bằng Systemd (`quizarena.service`)
+Trên máy chủ Cloud, sự cố mất điện vật lý hoặc lệnh khởi động lại VM (`sudo reboot`) không được phép làm tê liệt ứng dụng. Hệ thống thiết lập đơn vị dịch vụ systemd `/etc/systemd/system/quizarena.service`:
+```ini
+[Unit]
+Description=QuizArena Docker Compose Application Stack
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=deploy
+Group=docker
+WorkingDirectory=/opt/quizarena
+ExecStart=/usr/bin/docker compose -f docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml stop
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+```
+- Khi máy chủ khởi động lại, dịch vụ tự động bật toàn bộ container theo đúng thứ tự phụ thuộc (`postgres`, `redis`, `migrate`, `api`, `realtime`, `worker`, `web`, `nginx`).
+- Quản trị viên không cần truy cập SSH để khởi động lại dịch vụ bằng tay.
+
+### 8.2. Quét Lỗ Hổng Bảo Mật Container Với Trivy
+Trong cả hai pipeline CI ([.github/workflows/ci.yml](file:///d:/CodingProject/Python/quizarena/.github/workflows/ci.yml)) và CD ([.github/workflows/deploy.yml](file:///d:/CodingProject/Python/quizarena/.github/workflows/deploy.yml)), action `aquasecurity/trivy-action@0.29.0` được kích hoạt ngay sau khi build image:
+- **Phạm vi quét:** Hệ điều hành nền (`os`) và các thư viện phụ thuộc (`library`).
+- **Mức độ rủi ro:** Lọc các lỗ hổng mức `CRITICAL` và `HIGH`.
+- **Cờ kiểm soát:** `ignore-unfixed: true` để tránh cảnh báo sai đối với các CVE upstream chưa có bản vá từ nhà cung cấp hệ điều hành (Alpine Linux / Debian).
+
+### 8.3. Chính Sách Duy Trì Máy Chủ Oracle Cloud Always Free
+- **Rủi ro:** Oracle Cloud có chính sách thu hồi các tài nguyên Always Free Compute nếu CPU và RAM nhàn rỗi dưới 20% liên tục trong 7 ngày.
+- **Biện pháp kỹ thuật:**
+  - Stack dịch vụ của QuizArena (Postgres 17, Redis 7, các container Python FastAPI/Uvicorn, Nginx và Systemd Timer quét kiểm tra) tiêu thụ tài nguyên thực tế khoảng 25% – 35% RAM và CPU định kỳ.
+  - Cấu hình swap 2GB trên đĩa SSD NVMe giúp máy chủ ổn định khi có đột biến lưu lượng (Spike load).

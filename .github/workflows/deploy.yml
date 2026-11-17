@@ -121,6 +121,16 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 
+      - name: Quét lỗ hổng bảo mật Container Backend (Trivy)
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ needs.prepare.outputs.image_prefix }}/backend:${{ needs.prepare.outputs.target_sha }}
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
   # --------------------------------------------------------------------------
   # 3. Triển khai Rolling Update trên máy chủ qua SSH Deploy Wrapper
   # --------------------------------------------------------------------------

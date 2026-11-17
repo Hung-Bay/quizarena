@@ -173,7 +173,29 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+cat << 'EOF' > /etc/systemd/system/quizarena.service
+[Unit]
+Description=QuizArena Docker Compose Application Stack
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=deploy
+Group=docker
+WorkingDirectory=/opt/quizarena
+ExecStart=/usr/bin/docker compose -f docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml stop
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload || true
+systemctl enable quizarena.service || true
 systemctl enable --now quizarena-certbot-renew.timer || true
 
 echo "======================================================================"
