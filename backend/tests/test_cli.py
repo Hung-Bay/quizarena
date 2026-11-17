@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 from typer.testing import CliRunner
 
@@ -8,22 +9,29 @@ from tests.conftest import db_ready, skip_or_fail
 runner = CliRunner()
 
 
+def strip_ansi(text: str) -> str:
+    """Loại bỏ các mã thoát màu ANSI (do Rich / Typer sinh ra) để đối chiếu chuỗi thuần."""
+    return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
+
+
 def test_help_liet_ke_lenh_seed():
-    result = runner.invoke(app, ["--help"])
+    result = runner.invoke(app, ["--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
-    assert "seed" in result.output
-    assert "create-admin" in result.output
-    assert "smoke" in result.output
+    output = strip_ansi(result.output)
+    assert "seed" in output
+    assert "create-admin" in output
+    assert "smoke" in output
 
 
 def test_smoke_help_hien_thi_day_du_tham_so():
-    result = runner.invoke(app, ["smoke", "--help"])
+    result = runner.invoke(app, ["smoke", "--help"], env={"NO_COLOR": "1", "TERM": "dumb"})
     assert result.exit_code == 0
-    assert "--url" in result.output
-    assert "--sha" in result.output
-    assert "--email" in result.output
-    assert "--password" in result.output
-    assert "--timeout" in result.output
+    output = strip_ansi(result.output)
+    assert "--url" in output
+    assert "--sha" in output
+    assert "--email" in output
+    assert "--password" in output
+    assert "--timeout" in output
 
 
 def test_smoke_thanh_cong_khi_runner_tra_ve_true(monkeypatch):
@@ -46,9 +54,10 @@ def test_smoke_thanh_cong_khi_runner_tra_ve_true(monkeypatch):
     monkeypatch.setattr("app.game.smoke_runner.SmokeTestRunner.run", mock_run)
     result = runner.invoke(app, ["smoke", "--url", "http://testserver", "--sha", "a1b2c3d4e5f6"])
     assert result.exit_code == 0
-    assert "QUIZARENA SMOKE TEST RUNNER" in result.output
-    assert "SMOKE TEST THÀNH CÔNG RỰC RỠ" in result.output
-    assert "a1b2c3d4e5f6" in result.output
+    output = strip_ansi(result.output)
+    assert "QUIZARENA SMOKE TEST RUNNER" in output
+    assert "SMOKE TEST THÀNH CÔNG RỰC RỠ" in output
+    assert "a1b2c3d4e5f6" in output
 
 
 def test_smoke_that_bai_khi_runner_tra_ve_false(monkeypatch):
@@ -71,7 +80,8 @@ def test_smoke_that_bai_khi_runner_tra_ve_false(monkeypatch):
     monkeypatch.setattr("app.game.smoke_runner.SmokeTestRunner.run", mock_run)
     result = runner.invoke(app, ["smoke", "--url", "http://testserver", "--sha", "target_sha"])
     assert result.exit_code == 1
-    assert "SMOKE TEST THẤT BẠI" in result.output
+    output = strip_ansi(result.output)
+    assert "SMOKE TEST THẤT BẠI" in output
 
 
 def test_create_admin_mat_khau_yeu_bi_tu_choi():
