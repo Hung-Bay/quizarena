@@ -122,7 +122,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=web
 
       - name: Quét lỗ hổng bảo mật Container Backend (Trivy)
-        uses: aquasecurity/trivy-action@v0.29.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ needs.prepare.outputs.image_prefix }}/backend:${{ needs.prepare.outputs.target_sha }}
           format: 'table'
