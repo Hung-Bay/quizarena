@@ -274,5 +274,58 @@ def run_bots(
     typer.echo("=======================================================\n")
 
 
+@app.command("smoke")
+def smoke_test(
+    url: str = typer.Option(
+        "http://localhost", "--url", "-u", help="Base URL của hệ thống QuizArena"
+    ),
+    sha: str | None = typer.Option(None, "--sha", "-s", help="Commit SHA mục tiêu cần đối chiếu"),
+    email: str = typer.Option(
+        "admin@quizarena.io.vn", "--email", "-e", help="Email tài khoản Host"
+    ),
+    password: str = typer.Option("AdminPass123456!", "--password", "-p", help="Mật khẩu Host"),
+    timeout: float = typer.Option(60.0, "--timeout", "-t", help="Thời gian chờ tối đa (giây)"),
+) -> None:
+    """Thực thi Smoke Test toàn diện: DNS, TLS, Version SHA, REST API, và 1 Bot chơi qua WebSocket."""
+    from app.game.smoke_runner import SmokeTestConfig, SmokeTestRunner
+
+    config = SmokeTestConfig(
+        base_url=url,
+        expected_sha=sha,
+        host_email=email,
+        host_password=password,
+        timeout_s=timeout,
+    )
+
+    typer.echo("======================================================================")
+    typer.echo(f"  QUIZARENA SMOKE TEST RUNNER — MỤC TIÊU: {url}")
+    if sha:
+        typer.echo(f"  Commit SHA kỳ vọng : {sha}")
+    typer.echo("======================================================================")
+
+    runner = SmokeTestRunner(config)
+    report = asyncio.run(runner.run())
+
+    typer.echo("\n--- KẾT QUẢ TỪNG BƯỚC THỰC HIỆN ---")
+    for idx, step in enumerate(report.steps, start=1):
+        status_mark = "[✓ PASSED]" if step.passed else "[✗ FAILED]"
+        typer.echo(f"  {idx}. {status_mark} {step.name} ({step.duration_ms:.1f}ms)")
+        if step.detail:
+            typer.echo(f"     -> {step.detail}")
+
+    typer.echo("----------------------------------------------------------------------")
+    typer.echo(f"Phiên bản phục vụ thực tế : {report.active_version}")
+    typer.echo(f"Commit SHA thực tế        : {report.active_sha}")
+    typer.echo(f"Môi trường (app_env)      : {report.active_env}")
+    typer.echo(f"Tổng thời gian thực thi   : {report.total_duration_s:.2f}s")
+    typer.echo("======================================================================")
+
+    if not report.success:
+        typer.echo(f"\n[!] SMOKE TEST THẤT BẠI: {report.error}", err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo("\n[✓] SMOKE TEST THÀNH CÔNG RỰC RỠ! Toàn bộ chuỗi dịch vụ hoạt động hoàn hảo.")
+
+
 if __name__ == "__main__":
     app()

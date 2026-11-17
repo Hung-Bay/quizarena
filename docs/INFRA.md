@@ -236,3 +236,115 @@ Kết quả phản hồi hợp lệ:
    - Nhập biệt danh người chơi và bấm "Tham Gia".
    - Kết nối WebSocket tự động nâng cấp giao thức `wss://<domain>/ws/game?ticket=...` thành công.
    - Thử trả lời 1 câu hỏi trên điện thoại, Host nhận được điểm và bảng xếp hạng cập nhật ngay lập tức.
+
+
+## 7. Quy Trình CI/CD, Rolling Update & Tự Động Hóa Rollback (Phase 6)
+
+### 7.1. Kiến Trúc Pipeline CI/CD (`.github/workflows/deploy.yml`)
+Quy trình triển khai tự động lên môi trường Production được bảo vệ nghiêm ngặt qua 6 công đoạn liên hoàn:
+```mermaid
+flowchart LR
+    A["Push main / Dispatch"] --> B["Prepare & Git SHA"]
+    B --> C["Build Multi-arch GHCR"]
+    C --> D["Deploy via SSH Wrapper"]
+    D --> E["Smoke Test từ Internet"]
+    E -->|Thành công| F["Thông báo Discord/Telegram"]
+    E -->|Thất bại| G["Auto Rollback SHA trước"]
+    G --> F
+```
+
+1. **Chuẩn bị (Prepare):** Xác định commit SHA mục tiêu và SHA trước đó (`github.event.before` hoặc `HEAD~1`) để chuẩn bị cho cơ chế fallback.
+2. **Xây dựng Image Đa kiến trúc (Build & Push):** Sử dụng QEMU và Docker Buildx xây dựng 2 image `backend` và `web` cho cả hai nền tảng `linux/amd64` và `linux/arm64`, đẩy lên GHCR kèm thẻ tag `${{ github.sha }}` và `latest`.
+3. **Triển khai (Deploy):** Kết nối SSH vào máy chủ bằng tài khoản hạn chế quyền `deploy`, gửi lệnh triển khai qua `deploy_wrapper.sh`.
+4. **Smoke Test độc lập (Smoke Test):** Chạy lệnh `quizarena smoke` từ chính runner GitHub qua URL công khai (`https://<domain>`) để kiểm tra toàn bộ luồng mạng từ bên ngoài.
+5. **Tự động Rollback (Rollback):** Nếu Smoke Test phát hiện bất kỳ lỗi nào (sai SHA, lỗi TLS, rớt WebSocket, timeout), workflow lập tức kích hoạt bước rollback về commit SHA trước đó trong chưa đầy 30 giây.
+6. **Báo cáo (Notify):** Gửi thông tin trạng thái kèm mã màu và thông tin chi tiết qua Webhook Discord hoặc Bot Telegram.
+
+### 7.2. Bảo Mật SSH Key CI/CD: Nguyên Tắc Quyền Tối Thiểu (Least Privilege)
+Để triệt tiêu nguy cơ chiếm quyền điều khiển toàn bộ máy chủ nếu lộ khóa bí mật CI/CD:
+- **Tài khoản riêng biệt:** Khóa SSH chỉ cấp cho người dùng `deploy`, không cho phép đăng nhập bằng `root` (`PermitRootLogin no`).
+- **Ghim Fingerprint:** GH Actions sử dụng fingerprint ghim cứng trong secret `SSH_KNOWN_HOSTS` thay vì chạy `ssh-keyscan` lúc runtime, ngăn chặn triệt để tấn công MitM (Man-in-the-Middle).
+- **Giới hạn 1 lệnh qua Wrapper:** File `~/.ssh/authorized_keys` của tài khoản `deploy` được cấu hình bắt buộc:
+  ```authorized_keys
+  command="/home/deploy/deploy_wrapper.sh",no-pty,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAAC3...
+  ```
+- **Bộ lọc regex trong `deploy_wrapper.sh`:** Mọi lệnh do CI gửi sang đều được thẩm định:
+  - Chỉ chấp nhận cú pháp: `deploy <sha>`, `rollback <sha>`, `status`, hoặc `renew [--dry-run]`.
+  - Tham số SHA bắt buộc phải là chuỗi hex từ 7 đến 40 ký tự (`^[a-f0-9]{7,40}$`).
+  - Mọi yêu cầu mở interactive shell, chuyển tiếp cổng hay thực thi lệnh tùy biến đều bị chặn đứng ngay lập tức với mã lỗi `1`.
+
+### 7.3. Chiến Lược Rolling Update & Quy Trình Dừng Dịch Vụ Êm (Graceful Drain)
+1. **Kiểm tra an toàn cổng:** Chạy script `infra/scripts/verify_compose_ports.py` để đảm bảo không có cổng nội bộ nào (Postgres, Redis) bị lộ ra ngoài do sơ suất cấu hình.
+2. **Cập nhật mã nguồn & Tải Image:** Checkout đúng commit SHA và kéo image có tag tương ứng từ GHCR.
+3. **Chạy Migration trước (Expand Phase):**
+   ```bash
+   docker compose -f docker-compose.yml run --rm migrate
+   ```
+   Alembic migration luôn được áp dụng đầu tiên. Nếu có lỗi cấu trúc bảng, lệnh dừng ngay lập tức khi chưa động tới bất kỳ replica nào.
+4. **Rolling Update không làm rớt WebSocket:**
+   - Cập nhật `web` (Static frontend) trước: người dùng mới nhận giao diện mới. Do đã tách khỏi Gateway, việc cập nhật `web` không ảnh hưởng tới kết nối WebSocket hiện có.
+   - Cập nhật `api` (REST API).
+   - Cập nhật `realtime` (WebSocket): Tận dụng cấu hình `stop_grace_period: 30s`. Container cũ nhận tín hiệu `SIGTERM`, phát broadcast `server.draining` tới tất cả người chơi trong phòng. Client tự động kết nối lại sang replica mới trong < 2 giây.
+   - Reload cấu hình Gateway Nginx: Chạy `nginx -s reload`, các kết nối TCP dài hạn tiếp tục duy trì mượt mà.
+
+### 7.4. Kiểm Thử Hệ Thống Với CLI `quizarena smoke`
+CLI `quizarena smoke` là công cụ xác thực độc lập được chạy từ runner GitHub qua URL công khai, không sử dụng mock:
+- **Kiểm tra DNS & TLS:** Xác thực kết nối HTTPS thành công và chứng chỉ không bị hết hạn hoặc tự ký trái phép.
+- **Kiểm tra Version SHA:** Gửi request tới `GET /api/v1/version`, đối chiếu `commit_sha` trả về với mã SHA vừa deploy.
+- **REST API Flow:** Đăng nhập tài khoản Host, truy xuất Quiz mẫu có sẵn (hoặc khởi tạo Quiz 1 câu hỏi tiêu chuẩn, cam kết 0 AI quota không gọi Gemini), tạo phòng thi công khai (Lobby).
+- **WebSocket Bot Flow:** Host kết nối WebSocket lấy `room.sync`. Bot kết nối `wss://...`, hoàn tất bắt tay, Host bắt đầu trận (`game.start`), Bot nhận câu hỏi (`question.start`), Bot nộp câu trả lời (`answer.submit`), nhận phản hồi xác nhận (`answer.ack: accepted=True`), Host kết thúc trận (`game.end`) và giải phóng tài nguyên.
+
+### 7.5. Danh Sách GitHub Secrets & Environment Variables Cần Thiết
+Để pipeline hoạt động tự động trong mục **Settings -> Environments -> production**:
+| Tên Biến / Secret | Loại | Ý Nghĩa / Giá Trị Mẫu |
+| :--- | :--- | :--- |
+| `DOMAIN` | Variable | Tên miền chính thức của hệ thống (ví dụ: `quizarena.io.vn`) |
+| `VM_HOST` | Secret | Địa chỉ IP Public của máy chủ Production |
+| `SSH_USER` | Secret / Default | Tên người dùng deploy (mặc định: `deploy`) |
+| `SSH_PRIVATE_KEY` | Secret | Nội dung private key SSH của người dùng `deploy` (định dạng OpenSSH) |
+| `SSH_KNOWN_HOSTS` | Secret | Fingerprint host key của máy chủ (kết quả từ `ssh-keyscan -H <VM_HOST>`) |
+| `SMOKE_HOST_EMAIL` | Secret | Email tài khoản Host dùng để smoke test |
+| `SMOKE_HOST_PASSWORD` | Secret | Mật khẩu tài khoản Host dùng để smoke test |
+| `DISCORD_WEBHOOK_URL`| Secret (Tùy chọn) | Webhook URL kênh Discord nhận thông báo deploy |
+| `TELEGRAM_BOT_TOKEN` | Secret (Tùy chọn) | Bot token nhận thông báo deploy |
+| `TELEGRAM_CHAT_ID`   | Secret (Tùy chọn) | Chat ID Telegram nhận thông báo deploy |
+
+
+## 8. Tự Phục Hồi Sau Khởi Động Lại & Quét An Ninh Trivy (Phase 6)
+
+### 8.1. Cơ Chế Tự Phục Hồi Bằng Systemd (`quizarena.service`)
+Trên máy chủ Cloud, sự cố mất điện vật lý hoặc lệnh khởi động lại VM (`sudo reboot`) không được phép làm tê liệt ứng dụng. Hệ thống thiết lập đơn vị dịch vụ systemd `/etc/systemd/system/quizarena.service`:
+```ini
+[Unit]
+Description=QuizArena Docker Compose Application Stack
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=deploy
+Group=docker
+WorkingDirectory=/opt/quizarena
+ExecStart=/usr/bin/docker compose -f docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose -f docker-compose.yml stop
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
+```
+- Khi máy chủ khởi động lại, dịch vụ tự động bật toàn bộ container theo đúng thứ tự phụ thuộc (`postgres`, `redis`, `migrate`, `api`, `realtime`, `worker`, `web`, `nginx`).
+- Quản trị viên không cần truy cập SSH để khởi động lại dịch vụ bằng tay.
+
+### 8.2. Quét Lỗ Hổng Bảo Mật Container Với Trivy
+Trong cả hai pipeline CI ([.github/workflows/ci.yml](file:///d:/CodingProject/Python/quizarena/.github/workflows/ci.yml)) và CD ([.github/workflows/deploy.yml](file:///d:/CodingProject/Python/quizarena/.github/workflows/deploy.yml)), action `aquasecurity/trivy-action@v0.36.0` được kích hoạt ngay sau khi build image:
+- **Phạm vi quét:** Hệ điều hành nền (`os`) và các thư viện phụ thuộc (`library`).
+- **Mức độ rủi ro:** Lọc các lỗ hổng mức `CRITICAL` và `HIGH`.
+- **Cờ kiểm soát:** `ignore-unfixed: true` để tránh cảnh báo sai đối với các CVE upstream chưa có bản vá từ nhà cung cấp hệ điều hành (Alpine Linux / Debian).
+
+### 8.3. Chính Sách Duy Trì Máy Chủ Oracle Cloud Always Free
+- **Rủi ro:** Oracle Cloud có chính sách thu hồi các tài nguyên Always Free Compute nếu CPU và RAM nhàn rỗi dưới 20% liên tục trong 7 ngày.
+- **Biện pháp kỹ thuật:**
+  - Stack dịch vụ của QuizArena (Postgres 17, Redis 7, các container Python FastAPI/Uvicorn, Nginx và Systemd Timer quét kiểm tra) tiêu thụ tài nguyên thực tế khoảng 25% – 35% RAM và CPU định kỳ.
+  - Cấu hình swap 2GB trên đĩa SSD NVMe giúp máy chủ ổn định khi có đột biến lưu lượng (Spike load).

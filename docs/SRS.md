@@ -508,6 +508,16 @@ Hệ thống QuizArena phải đáp ứng nghiêm ngặt 10 chỉ tiêu phi ch�
 - **NFR-PERF-02 (Thời gian sống ws-ticket):** Vé WebSocket một lần chỉ có hiệu lực tối đa **30 giây** trong Redis, bị vô hiệu hóa tức thì bằng lệnh nguyên tử `GETDEL` ngay khi bắt đầu bắt tay WebSocket.
 - **NFR-RES-01 (Giới hạn bộ nhớ Redis):** Redis cấu hình cứng `maxmemory 128mb` với chính sách `maxmemory-policy noeviction`. Toàn bộ dữ liệu tạm thời bắt buộc phải có TTL xác định, Stream câu trả lời phải được `XTRIM` hoặc đặt `EXPIRE` sau trận để bảo đảm mức tiêu thụ bộ nhớ luôn **$< 64\text{ MB}$ (dưới 50% trần bộ nhớ)**.
 
+### 5.3. Yêu cầu Hạ tầng Đám mây, HTTPS & Tự động hóa CI/CD (Phase 6)
+
+- **NF-CLOUD-01 (Tên miền & Chứng chỉ HTTPS):** Hệ thống phục vụ chính thức trên domain hợp lệ (`https://<domain>`), tự động chuyển hướng HTTP $\rightarrow$ HTTPS bằng mã 301. Người chơi từ mạng di động 4G/5G bên ngoài quét mã QR truy cập tức thì mà không gặp cảnh báo bảo mật.
+- **NF-CLOUD-02 (Điểm liệt An toàn Cổng - Zero Exposed Internal Ports):** Máy chủ tường lửa 2 lớp (Security List / UFW / iptables) đảm bảo quét `nmap` từ Internet **chỉ thấy duy nhất 3 cổng mở: 22 (SSH), 80 (HTTP), 443 (HTTPS)**. Cổng PostgreSQL `5432` và Redis `6379` bị cô lập hoàn toàn trong mạng nội bộ, tuyệt đối không có `ports:` ra ngoài Internet.
+- **NF-CLOUD-03 (Bảo mật SSH & Nguyên tắc Quyền Tối thiểu):** Khóa cứng SSH: `PermitRootLogin no`, `PasswordAuthentication no`. Khóa SSH CI/CD cấp riêng cho người dùng `deploy`, giới hạn lệnh thực thi qua `deploy_wrapper.sh` (chỉ cho phép `deploy <sha>`, `rollback <sha>`, `status`, `renew`), vô hiệu hóa PTY và port-forwarding.
+- **NF-CLOUD-04 (CI/CD Đa kiến trúc & Deploy Không Gián đoạn):** Pipeline GitHub Actions tự động build image multi-arch (`linux/amd64`, `linux/arm64`) đẩy lên GHCR. Thực hiện rolling update mượt mà (scale replica mới song song, dừng replica cũ tuần tự với grace period 30s) đảm bảo **deploy giữa trận không làm gián đoạn phòng thi, thời gian reconnect $< 3\text{ giây}$, đối soát số đáp án bot gửi = Stream = DB đạt 100%**.
+- **NF-CLOUD-05 (Tự động Rollback & Tương thích ngược Database):** Khi Smoke Test sau deploy thất bại, pipeline tự động rollback về commit SHA trước đó trong **$< 30\text{ giây}$**. Áp dụng nguyên tắc Expand/Contract cho Alembic: Rollback chỉ lùi mã nguồn/image, không lùi cơ sở dữ liệu.
+- **NF-CLOUD-06 (Chuẩn Bảo mật SSL Labs Hạng A):** Cấu hình Gateway Nginx chỉ bật TLS 1.2 và 1.3, bộ mã hóa mạnh mẽ hỗ trợ Forward Secrecy, HSTS ngắn hạn, tắt OCSP stapling, bật Content-Security-Policy ở chế độ enforce.
+- **NF-CLOUD-07 (Tự Phục hồi sau Khởi động lại VM):** Tích hợp systemd service `quizarena.service` tự động khôi phục toàn bộ stack Docker Compose sau khi máy chủ khởi động lại mà không cần can thiệp thủ công.
+
 ---
 
 ## 6. Yêu cầu dữ liệu (Phase 1)

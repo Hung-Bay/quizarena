@@ -129,6 +129,16 @@ jobs:
             exit 1
           fi
 
+      - name: Quét lỗ hổng bảo mật Container Backend (Trivy)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: quizarena-backend:ci
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
       - name: Cài đặt QEMU cho multi-arch build
         uses: docker/setup-qemu-action@v3
 
