@@ -1,0 +1,217 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Trạng Thái Hoạt Động Trực Tiếp (Realtime Game Overview)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "title": "Số Lượng Trận Đấu Đang Mở",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(games_active) or vector(0)",
+          "legendFormat": "Phòng active",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "orange", "value": 200 },
+              { "color": "red", "value": 400 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "title": "Tổng Số Kết Nối WebSocket",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(ws_connections) or vector(0)",
+          "legendFormat": "WS Connections",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "title": "Tốc Độ Nộp Đáp Án (answers/s)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(game_answers_total[1m])) or vector(0)",
+          "legendFormat": "req/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 3 },
+              { "color": "purple", "value": 4 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "title": "Số Replica Realtime Đang Phục Vụ",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "count(ws_connections) or vector(1)",
+          "legendFormat": "Replicas",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 101,
+      "title": "Cam Kết Chất Lượng Dịch Vụ (SLA NF-2 & NF-3)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "id": 5,
+      "title": "Độ Trễ Nộp Đáp Án Server (NF-2: p95 < 150ms)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(game_answer_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95 Answer Latency",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(game_answer_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p50 Answer Latency",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "id": 6,
+      "title": "Độ Trễ Broadcast Câu Hỏi (NF-3: p95 < 500ms)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(game_broadcast_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95 Broadcast Latency",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(game_broadcast_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p50 Broadcast Latency",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 102,
+      "title": "Nhật Ký Sự Kiện Realtime (Tra Cứu game_id Qua Loki)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "Loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "id": 7,
+      "title": "Live Logs Tra Cứu Theo game_id ($game_id)",
+      "type": "logs",
+      "targets": [
+        {
+          "expr": "{service=~\"realtime|api\"} |= \"$game_id\"",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["quizarena", "production", "live"],
+  "templating": {
+    "list": [
+      {
+        "current": { "text": "", "value": "" },
+        "name": "game_id",
+        "label": "Mã Trận (game_id)",
+        "type": "textbox",
+        "hide": 0
+      }
+    ]
+  },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m"] },
+  "timezone": "browser",
+  "title": "QuizArena Live",
+  "uid": "quizarena-live",
+  "version": 1
+}

@@ -1,0 +1,172 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Hạn Mức & Tốc Độ Gọi Gemini API (Rate Limits)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "max": 15,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 10 },
+              { "color": "red", "value": 14 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "title": "RPM Sử Dụng / Hạn Mức (15 RPM)",
+      "type": "gauge",
+      "targets": [
+        {
+          "expr": "gemini_quota_rpm_used or sum(rate(gemini_calls_total[1m])) * 60 or vector(0)",
+          "legendFormat": "RPM Hiện Tại",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "max": 1500,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1000 },
+              { "color": "red", "value": 1350 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "title": "RPD Sử Dụng / Hạn Mức (1,500 RPD)",
+      "type": "gauge",
+      "targets": [
+        {
+          "expr": "gemini_quota_rpd_used or sum(increase(gemini_calls_total[24h])) or vector(0)",
+          "legendFormat": "RPD Hôm Nay",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "title": "Tổng Số Lượt Gọi AI Sinh Quiz",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(gemini_calls_total{purpose=\"quiz_generation\"}) or vector(0)",
+          "legendFormat": "Sinh Quiz",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "title": "Tổng Số Lượt Phân Tích Báo Cáo AI",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(gemini_calls_total{purpose=\"game_report\"}) or vector(0)",
+          "legendFormat": "Báo Cáo Trận",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 7 },
+      "id": 101,
+      "title": "Tiêu Thụ Token & Trạng Thái Gọi API",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60 }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 5,
+      "title": "Tốc Độ Tiêu Thụ Token Theo Model (tokens/s)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(gemini_tokens_total[2m])) by (model, type)",
+          "legendFormat": "{{model}} - {{type}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth" }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 6,
+      "title": "Tỷ Lệ Gọi API Thành Công vs Thất Bại / Hết Quota",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(gemini_calls_total[2m])) by (status)",
+          "legendFormat": "Status: {{status}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["quizarena", "gemini", "ai", "quota"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "browser",
+  "title": "AI & Quota",
+  "uid": "ai-quota",
+  "version": 1
+}

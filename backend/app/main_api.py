@@ -73,6 +73,12 @@ async def metrics() -> Response:
     return metrics_endpoint_response()
 
 
+@app.get("/api/v1/debug/sentry-error")
+async def trigger_sentry_error() -> None:
+    """Điểm gây lỗi cố ý để kiểm thử Sentry/GlitchTip stack trace (Phase 7 tiêu chí bắt buộc)."""
+    raise RuntimeError("QuizArena Deliberate Test Error for GlitchTip/Sentry Verification")
+
+
 _DEMO_HTML_PATH = Path(__file__).parent / "static" / "demo.html"
 
 

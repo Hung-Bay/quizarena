@@ -17,6 +17,7 @@ dependencies = [
     "pypdf>=6.21.4",
     "python-multipart>=0.0.33",
     "redis>=5.3.1",
+    "sentry-sdk>=2.75.0",
     "sqlalchemy[asyncio]>=2.1.6",
     "typer>=0.27.3",
     "tzdata>=2026.6",
