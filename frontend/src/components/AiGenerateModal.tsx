@@ -99,7 +99,9 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({
 
       if (!uploadRes.ok) {
         const errJson = await uploadRes.json().catch(() => ({}));
-        throw new Error(errJson?.detail || 'Không thể tải lên tài liệu.');
+        const errMsg =
+          errJson?.error?.message || errJson?.detail || errJson?.message || 'Không thể tải lên tài liệu.';
+        throw new Error(errMsg);
       }
 
       const enqueueData = (await uploadRes.json()) as components['schemas']['AiJobEnqueueResponse'];
