@@ -104,6 +104,41 @@ GAMES_ACTIVE = Gauge(
     "Số lượng trận đấu đang mở",
 )
 
+# 8. Gauge độ sâu hàng đợi công việc nền (Worker queue depth) (Phase 7)
+WORKER_QUEUE_DEPTH = Gauge(
+    "worker_queue_depth",
+    "Số lượng công việc đang chờ xử lý trong Redis/ARQ queue",
+    labelnames=["queue_name"],
+)
+
+# 9. Gauge hạn mức và mức tiêu thụ Gemini API Quota (RPM & RPD) (Phase 7)
+GEMINI_QUOTA_RPM_LIMIT = Gauge(
+    "gemini_quota_rpm_limit",
+    "Giới hạn số request mỗi phút (RPM) của Gemini API",
+)
+
+GEMINI_QUOTA_RPM_USED = Gauge(
+    "gemini_quota_rpm_used",
+    "Số request đã dùng trong phút hiện tại",
+)
+
+GEMINI_QUOTA_RPD_LIMIT = Gauge(
+    "gemini_quota_rpd_limit",
+    "Giới hạn số request mỗi ngày (RPD) của Gemini API",
+)
+
+GEMINI_QUOTA_RPD_USED = Gauge(
+    "gemini_quota_rpd_used",
+    "Số request đã dùng trong ngày hiện tại",
+)
+
+# 10. Gauge số lượng replica của từng service (phục vụ đối soát autoscale) (Phase 7)
+QUIZARENA_REPLICAS = Gauge(
+    "quizarena_replicas",
+    "Số lượng container replica đang chạy của từng service",
+    labelnames=["service"],
+)
+
 
 def metrics_endpoint_response() -> Response:
     """Trả về dữ liệu metrics chuẩn Prometheus text format."""

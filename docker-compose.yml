@@ -190,10 +190,76 @@ services:
       - "--web.enable-lifecycle"
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
       - promdata:/prometheus
     expose:
       - "9090"
     networks: [app, monitoring]
+    logging: *default-logging
+
+  loki:
+    image: grafana/loki:3.1.1
+    restart: unless-stopped
+    profiles: [monitoring]
+    command: ["-config.file=/etc/loki/loki.yml"]
+    volumes:
+      - ./infra/loki/loki.yml:/etc/loki/loki.yml:ro
+      - lokidata:/loki
+    expose:
+      - "3100"
+    networks: [monitoring]
+    logging: *default-logging
+
+  alloy:
+    image: grafana/alloy:v1.3.1
+    restart: unless-stopped
+    profiles: [monitoring]
+    command:
+      - "run"
+      - "/etc/alloy/config.alloy"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+      - "--storage.path=/var/lib/alloy/data"
+    volumes:
+      - ./infra/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - loki
+    networks: [monitoring]
+    logging: *default-logging
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    profiles: [monitoring]
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host/root"
+      - "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+      - textfile_collector:/var/lib/node_exporter/textfile_collector:ro
+    expose:
+      - "9100"
+    networks: [monitoring]
+    logging: *default-logging
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    restart: unless-stopped
+    profiles: [monitoring]
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    expose:
+      - "8080"
+    networks: [monitoring]
     logging: *default-logging
 
   grafana:
@@ -212,11 +278,13 @@ services:
       - GF_AUTH_PROXY_AUTO_SIGN_UP=true
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
     expose:
       - "3000"
     depends_on:
       - prometheus
+      - loki
     networks: [app, monitoring]
     logging: *default-logging
 
@@ -232,6 +300,8 @@ volumes:
   redisdata:
   uploads:
   promdata:
+  lokidata:
+  textfile_collector:
   grafanadata:
   certbot_etc:
   certbot_var:

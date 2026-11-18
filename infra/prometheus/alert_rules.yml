@@ -1,0 +1,52 @@
+groups:
+  - name: quizarena_alerts
+    rules:
+      # 1. Alert rớt kết nối hoặc service chết
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service QuizArena ngừng hoạt động: {{ $labels.instance }}"
+          description: "Mục tiêu {{ $labels.job }} ({{ $labels.instance }}) đã mất kết nối > 1 phút."
+
+      # 2. Alert thời gian nộp đáp án vượt ngưỡng SLA NF-2 (p95 > 150ms)
+      - alert: HighAnswerLatencyNF2
+        expr: histogram_quantile(0.95, sum(rate(game_answer_duration_seconds_bucket[2m])) by (le)) > 0.150
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Thời gian xử lý nộp đáp án (p95) vượt chuẩn SLA NF-2 (>150ms)"
+          description: "p95 hiện tại là {{ $value | humanizeDuration }}, cao hơn mức cho phép 150ms."
+
+      # 3. Alert tỷ lệ lỗi HTTP 5xx cao
+      - alert: HighHttp5xxRate
+        expr: sum(rate(http_request_duration_seconds_count{status=~"5.."}[2m])) / sum(rate(http_request_duration_seconds_count[2m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Tỷ lệ lỗi HTTP 5xx vượt quá 5%"
+          description: "Hệ thống đang ghi nhận tỷ lệ lỗi server {{ $value | humanizePercentage }} trong 2 phút qua."
+
+      # 4. Alert Backup cơ sở dữ liệu cũ hơn 26 giờ (§7.9 tiêu chí bắt buộc)
+      - alert: DatabaseBackupTooOld
+        expr: (time() - node_textfile_mtime_seconds{file="last_backup_success.prom"}) > 93600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bản sao lưu cơ sở dữ liệu cũ hơn 26 giờ"
+          description: "Không có bản sao lưu Postgres mới nào thành công trong suốt 26 giờ qua."
+
+      # 5. Alert chạm trần Quota Gemini API
+      - alert: GeminiQuotaNearLimit
+        expr: (gemini_quota_rpd_used / gemini_quota_rpd_limit) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Mức sử dụng Gemini API Quota RPD đã vượt 85%"
+          description: "Đã sử dụng hơn 85% hạn ngạch request mỗi ngày của Gemini API."

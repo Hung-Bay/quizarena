@@ -298,7 +298,7 @@ CLI `quizarena smoke` là công cụ xác thực độc lập được chạy t�
 Để pipeline hoạt động tự động trong mục **Settings -> Environments -> production**:
 | Tên Biến / Secret | Loại | Ý Nghĩa / Giá Trị Mẫu |
 | :--- | :--- | :--- |
-| `DOMAIN` | Variable | Tên miền chính thức của hệ thống (ví dụ: `quizarena.io.vn`) |
+| `DOMAIN` | Variable | Tên miền chính thức của hệ thống (`requiz.io.vn`) |
 | `VM_HOST` | Secret | Địa chỉ IP Public của máy chủ Production |
 | `SSH_USER` | Secret / Default | Tên người dùng deploy (mặc định: `deploy`) |
 | `SSH_PRIVATE_KEY` | Secret | Nội dung private key SSH của người dùng `deploy` (định dạng OpenSSH) |

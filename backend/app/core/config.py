@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # --- Uploads ---
     upload_dir: str = "uploads"
 
+    # --- Sentry / GlitchTip (Phase 7 - Error Tracking & Tracing) ---
+    sentry_dsn: SecretStr | None = None
+    sentry_traces_sample_rate: float = Field(default=0.1, ge=0.0, le=1.0)
+
     @model_validator(mode="after")
     def _no_placeholder_secrets_in_prod(self) -> "Settings":
         if self.app_env == "prod":
