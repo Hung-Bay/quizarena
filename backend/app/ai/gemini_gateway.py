@@ -16,7 +16,7 @@ from typing import Any
 from google import genai
 from google.genai import errors, types
 
-from app.ai.fake import GeminiGatewayError, GeminiRateLimitError
+from app.ai.fake import GeminiGatewayError, GeminiRateLimitError, GeminiServerError
 from app.ai.gateway_interface import GeminiGatewayProtocol
 from app.ai.schemas import (
     AiGenerationParams,
@@ -144,13 +144,15 @@ class GeminiGateway(GeminiGatewayProtocol):
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-3.5-flash",
-        timeout_seconds: float = 90.0,
+        model_name: str = "gemini-3.5-flash-lite",
+        timeout_seconds: float = 180.0,
         max_retries: int = 3,
+        fallback_model: str | None = "gemini-3.5-flash-lite",
     ) -> None:
         self.model_name = model_name
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self.fallback_model = fallback_model
         self.client = genai.Client(api_key=api_key)
 
     def get_model_info(self) -> dict[str, Any]:
@@ -210,6 +212,22 @@ class GeminiGateway(GeminiGatewayProtocol):
             raise GeminiRateLimitError(
                 message=f"Gemini API 429 Quota Exceeded: {e}", retry_delay=retry_delay
             ) from e
+
+        # Phát hiện lỗi quá tải hoặc bảo trì phía Google (503 Service Unavailable / 500 / 502 / 504)
+        is_server_error = (
+            isinstance(e, errors.ServerError)
+            or (isinstance(e, errors.APIError) and getattr(e, "code", None) in (500, 502, 503, 504))
+            or "503" in str(e)
+            or "high demand" in str(e).lower()
+            or "spikes in demand" in str(e).lower()
+            or "unavailable" in str(e).lower()
+        )
+        if is_server_error:
+            raise GeminiServerError(
+                message=f"Gemini API quá tải hoặc tạm thời không khả dụng: {e}",
+                retry_delay=3.0,
+            ) from e
+
         if isinstance(e, errors.APIError):
             raise GeminiGatewayError(f"Gemini API Error [{e.code}]: {e.message}") from e
         raise GeminiGatewayError(f"Lỗi không xác định khi gọi Gemini: {e}") from e
@@ -224,14 +242,15 @@ class GeminiGateway(GeminiGatewayProtocol):
         ]
         config = self._get_generation_config()
         loop = asyncio.get_running_loop()
+        active_model = self.model_name
 
         for attempt in range(self.max_retries + 1):
             try:
                 res = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda: self.client.models.generate_content(
-                            model=self.model_name,
+                        lambda m=active_model: self.client.models.generate_content(
+                            model=m,
                             contents=contents,
                             config=config,
                         ),
@@ -251,10 +270,25 @@ class GeminiGateway(GeminiGatewayProtocol):
                     draft=draft,
                     raw_json=raw_text,
                     usage=self._extract_usage(res),
-                    model_name=self.model_name,
+                    model_name=active_model,
                 )
 
             except TimeoutError as te:
+                if (
+                    attempt < self.max_retries
+                    and self.fallback_model
+                    and active_model != self.fallback_model
+                ):
+                    log.warning(
+                        "Gọi %s bị timeout sau %.1fs (attempt %d/%d). Thử fallback sang %s...",
+                        active_model,
+                        self.timeout_seconds,
+                        attempt + 1,
+                        self.max_retries,
+                        self.fallback_model,
+                    )
+                    active_model = self.fallback_model
+                    continue
                 raise TimeoutError(
                     f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
                 ) from te
@@ -272,6 +306,26 @@ class GeminiGateway(GeminiGatewayProtocol):
                         delay,
                     )
                     await asyncio.sleep(delay)
+                except GeminiServerError as se:
+                    if attempt >= self.max_retries:
+                        raise
+                    if self.fallback_model and active_model != self.fallback_model:
+                        log.warning(
+                            "Gemini model %s bị quá tải/503 (attempt %d/%d). Tự động fallback sang %s...",
+                            active_model,
+                            attempt + 1,
+                            self.max_retries,
+                            self.fallback_model,
+                        )
+                        active_model = self.fallback_model
+                    delay = se.retry_delay * (1.5**attempt)
+                    log.warning(
+                        "Gemini Server Overload (attempt %d/%d). Đang chờ %.2fs trước khi thử lại...",
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
 
         raise GeminiGatewayError("Đã hết số lần thử lại kết nối Gemini.")
 
@@ -283,14 +337,15 @@ class GeminiGateway(GeminiGatewayProtocol):
         contents = [file_part, user_prompt]
         config = self._get_generation_config()
         loop = asyncio.get_running_loop()
+        active_model = self.model_name
 
         for attempt in range(self.max_retries + 1):
             try:
                 res = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda: self.client.models.generate_content(
-                            model=self.model_name,
+                        lambda m=active_model: self.client.models.generate_content(
+                            model=m,
                             contents=contents,
                             config=config,
                         ),
@@ -310,10 +365,25 @@ class GeminiGateway(GeminiGatewayProtocol):
                     draft=draft,
                     raw_json=file_raw_text,
                     usage=self._extract_usage(res),
-                    model_name=self.model_name,
+                    model_name=active_model,
                 )
 
             except TimeoutError as te:
+                if (
+                    attempt < self.max_retries
+                    and self.fallback_model
+                    and active_model != self.fallback_model
+                ):
+                    log.warning(
+                        "Gọi %s bị timeout sau %.1fs (attempt %d/%d). Thử fallback sang %s...",
+                        active_model,
+                        self.timeout_seconds,
+                        attempt + 1,
+                        self.max_retries,
+                        self.fallback_model,
+                    )
+                    active_model = self.fallback_model
+                    continue
                 raise TimeoutError(
                     f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
                 ) from te
@@ -326,6 +396,26 @@ class GeminiGateway(GeminiGatewayProtocol):
                     delay = rle.retry_delay or (1.0 * (2**attempt))
                     log.warning(
                         "Gemini 429 Rate Limited (attempt %d/%d). Đang chờ %.2fs...",
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                except GeminiServerError as se:
+                    if attempt >= self.max_retries:
+                        raise
+                    if self.fallback_model and active_model != self.fallback_model:
+                        log.warning(
+                            "Gemini model %s bị quá tải/503 (attempt %d/%d). Tự động fallback sang %s...",
+                            active_model,
+                            attempt + 1,
+                            self.max_retries,
+                            self.fallback_model,
+                        )
+                        active_model = self.fallback_model
+                    delay = se.retry_delay * (1.5**attempt)
+                    log.warning(
+                        "Gemini Server Overload (attempt %d/%d). Đang chờ %.2fs trước khi thử lại...",
                         attempt + 1,
                         self.max_retries,
                         delay,
@@ -364,14 +454,15 @@ class GeminiGateway(GeminiGatewayProtocol):
             temperature=0.3,
         )
         loop = asyncio.get_running_loop()
+        active_model = self.model_name
 
         for attempt in range(self.max_retries + 1):
             try:
                 res = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda: self.client.models.generate_content(
-                            model=self.model_name,
+                        lambda m=active_model: self.client.models.generate_content(
+                            model=m,
                             contents=[prompt],
                             config=config,
                         ),
@@ -381,6 +472,21 @@ class GeminiGateway(GeminiGatewayProtocol):
                 raw_text = res.text or ""
                 return QuestionDraft.model_validate_json(raw_text)
             except TimeoutError as te:
+                if (
+                    attempt < self.max_retries
+                    and self.fallback_model
+                    and active_model != self.fallback_model
+                ):
+                    log.warning(
+                        "Gọi %s bị timeout sau %.1fs (attempt %d/%d). Thử fallback sang %s...",
+                        active_model,
+                        self.timeout_seconds,
+                        attempt + 1,
+                        self.max_retries,
+                        self.fallback_model,
+                    )
+                    active_model = self.fallback_model
+                    continue
                 raise TimeoutError(
                     f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
                 ) from te
@@ -393,6 +499,26 @@ class GeminiGateway(GeminiGatewayProtocol):
                     delay = rle.retry_delay or (1.0 * (2**attempt))
                     log.warning(
                         "Gemini 429 Rate Limited (attempt %d/%d). Đang chờ %.2fs...",
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                except GeminiServerError as se:
+                    if attempt >= self.max_retries:
+                        raise
+                    if self.fallback_model and active_model != self.fallback_model:
+                        log.warning(
+                            "Gemini model %s bị quá tải/503 (attempt %d/%d). Tự động fallback sang %s...",
+                            active_model,
+                            attempt + 1,
+                            self.max_retries,
+                            self.fallback_model,
+                        )
+                        active_model = self.fallback_model
+                    delay = se.retry_delay * (1.5**attempt)
+                    log.warning(
+                        "Gemini Server Overload (attempt %d/%d). Đang chờ %.2fs trước khi thử lại...",
                         attempt + 1,
                         self.max_retries,
                         delay,
@@ -411,14 +537,15 @@ class GeminiGateway(GeminiGatewayProtocol):
             temperature=0.3,
         )
         loop = asyncio.get_running_loop()
+        active_model = self.model_name
 
         for attempt in range(self.max_retries + 1):
             try:
                 res = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda: self.client.models.generate_content(
-                            model=self.model_name,
+                        lambda m=active_model: self.client.models.generate_content(
+                            model=m,
                             contents=[prompt],
                             config=config,
                         ),
@@ -437,9 +564,24 @@ class GeminiGateway(GeminiGatewayProtocol):
                     draft=draft,
                     raw_json=raw_text,
                     usage=self._extract_usage(res),
-                    model_name=self.model_name,
+                    model_name=active_model,
                 )
             except TimeoutError as te:
+                if (
+                    attempt < self.max_retries
+                    and self.fallback_model
+                    and active_model != self.fallback_model
+                ):
+                    log.warning(
+                        "Gọi %s bị timeout sau %.1fs (attempt %d/%d). Thử fallback sang %s...",
+                        active_model,
+                        self.timeout_seconds,
+                        attempt + 1,
+                        self.max_retries,
+                        self.fallback_model,
+                    )
+                    active_model = self.fallback_model
+                    continue
                 raise TimeoutError(
                     f"Gọi Gemini API vượt quá thời gian chờ {self.timeout_seconds}s"
                 ) from te
@@ -452,6 +594,26 @@ class GeminiGateway(GeminiGatewayProtocol):
                     delay = rle.retry_delay or (1.0 * (2**attempt))
                     log.warning(
                         "Gemini 429 Rate Limited (report attempt %d/%d). Đang chờ %.2fs...",
+                        attempt + 1,
+                        self.max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                except GeminiServerError as se:
+                    if attempt >= self.max_retries:
+                        raise
+                    if self.fallback_model and active_model != self.fallback_model:
+                        log.warning(
+                            "Gemini model %s bị quá tải/503 (attempt %d/%d). Tự động fallback sang %s...",
+                            active_model,
+                            attempt + 1,
+                            self.max_retries,
+                            self.fallback_model,
+                        )
+                        active_model = self.fallback_model
+                    delay = se.retry_delay * (1.5**attempt)
+                    log.warning(
+                        "Gemini Server Overload (report attempt %d/%d). Đang chờ %.2fs trước khi thử lại...",
                         attempt + 1,
                         self.max_retries,
                         delay,
@@ -473,8 +635,15 @@ def create_gemini_gateway(settings: Settings | None = None) -> GeminiGatewayProt
             raise ValueError(
                 "GEMINI_GATEWAY_MODE='real' nhưng thiếu GEMINI_API_KEY trong cấu hình."
             )
-        model = settings.gemini_model_quiz or "gemini-3.5-flash"
-        return GeminiGateway(api_key=api_key, model_name=model)
+        model = settings.gemini_model_quiz or "gemini-3.5-flash-lite"
+        timeout_seconds = getattr(settings, "gemini_timeout_seconds", 180.0)
+        fallback_model = getattr(settings, "gemini_fallback_model", "gemini-3.5-flash-lite")
+        return GeminiGateway(
+            api_key=api_key,
+            model_name=model,
+            timeout_seconds=timeout_seconds,
+            fallback_model=fallback_model,
+        )
 
     # Mặc định dev/test trả về FakeGemini
     from app.ai.fake import FakeGemini
