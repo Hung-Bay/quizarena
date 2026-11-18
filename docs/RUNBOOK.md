@@ -343,7 +343,34 @@ Nmap done: 1 IP address (1 host up) scanned in 48.21 seconds
 
 ---
 
-## 11. Kịch Bản Diễn Tập Demo 15 Phút Nghiệm Thu (Handbook)
+## 11. Quy Trình Sao Lưu & Phục Hồi Thảm Họa (Disaster Recovery & Backup §7.7)
+
+### 11.1. Cam Kết Chỉ Số Phục Hồi (RPO & RTO Targets)
+- **RPO (Recovery Point Objective):** $\le 24$ giờ (mất dữ liệu tối đa 24 giờ thông qua cơ chế backup định kỳ mỗi ngày một lần vào 02:00 sáng).
+- **RTO (Recovery Time Objective):** $\le 60$ giây (thời gian khôi phục toàn bộ database và schema từ bản dump đo đạc thực tế chỉ mất $\sim 5 - 15$ giây).
+
+### 11.2. Kịch Bản Sao Lưu Tự Động Hằng Ngày (`backup_postgres.sh`)
+- Lệnh chạy: `bash /opt/quizarena/infra/scripts/backup_postgres.sh`
+- **Đặc tính kỹ thuật:**
+  - Sử dụng `pg_dump -Fc` (PostgreSQL Custom Compressed format) trực tiếp qua `docker compose exec -T postgres`, không mở port ra host.
+  - Kiểm tra dung lượng tệp (`BACKUP_SIZE > 100 bytes`) và kiểm tra TOC dump (`pg_restore --list`).
+  - Xoay vòng lưu trữ: Giữ lại bản sao lưu của 7 ngày gần nhất (`RETENTION_DAYS=7`).
+  - Tùy chọn mã hóa `openssl enc -aes-256-cbc` và đồng bộ offsite qua `rclone`.
+  - Tự động ghi metric ra `/var/lib/node_exporter/textfile_collector/last_backup_success.prom` cho Prometheus giám sát alert `DatabaseBackupTooOld`.
+
+### 11.3. Diễn Tập Phục Hồi Dữ Liệu (`restore_postgres.sh`)
+- Lệnh chạy diễn tập an toàn: `bash /opt/quizarena/infra/scripts/restore_postgres.sh`
+- **Quy trình diễn tập:**
+  1. Tự động tìm bản backup `.dump` mới nhất.
+  2. Tạo cơ sở dữ liệu tạm thời `quizarena_drill` (cô lập 100% với database production đang chạy).
+  3. Nạp dữ liệu qua `pg_restore --clean --if-exists`.
+  4. Xác thực số dòng (row counts) của 4 bảng cốt lõi: `users`, `quizzes`, `questions`, `game_sessions`.
+  5. Đối soát phiên bản migration: `SELECT version_num FROM alembic_version`.
+  6. Đo và in ra thời gian phục hồi RTO thực tế.
+
+---
+
+## 12. Kịch Bản Diễn Tập Demo 15 Phút Nghiệm Thu (Handbook)
 
 Dành cho phần trình diễn trước Giảng viên / Mentor:
 
