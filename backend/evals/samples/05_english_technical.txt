@@ -1,0 +1,11 @@
+DATABASE INDEXING AND PERFORMANCE OPTIMIZATION
+
+A database index is a data structure that improves the speed of data retrieval operations on a database table.
+However, indexes come at the cost of additional writes and storage space to maintain the index data structure.
+B-Tree (Balanced Tree) is the default and most widely used index structure in relational databases such as PostgreSQL and MySQL.
+A B-Tree maintains sorted data and allows searches, sequential access, insertions, and deletions in logarithmic time: O(log n).
+Hash indexes, on the other hand, provide O(1) average lookup time but only support direct equality (=) comparisons, not range queries (<, >).
+A Composite Index (multi-column index) is an index on two or more columns of a table.
+The order of columns in a composite index is critical: the query must use the leading columns (leftmost prefix) to utilize the index efficiently.
+Over-indexing can severely degrade write performance (INSERT, UPDATE, DELETE) because every index must be synchronously updated.
+In PostgreSQL, the EXPLAIN ANALYZE command shows the execution plan chosen by the optimizer along with actual execution timing.

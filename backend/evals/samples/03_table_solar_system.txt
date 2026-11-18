@@ -1,0 +1,20 @@
+BẢNG THỐNG KÊ CÁC HÀNH TINH TRONG HỆ MẶT TRỜI
+
+Dưới đây là bảng số liệu so sánh giữa các hành tinh:
+
+| Tên hành tinh | Khoảng cách tới Mặt Trời (AU) | Bán kính xích đạo (km) | Chu kỳ quỹ đạo (năm) | Số vệ tinh tự nhiên |
+| :--- | :--- | :--- | :--- | :--- |
+| Sao Thủy (Mercury) | 0.39 | 2439.7 | 0.24 | 0 |
+| Sao Kim (Venus) | 0.72 | 6051.8 | 0.62 | 0 |
+| Trái Đất (Earth) | 1.00 | 6371.0 | 1.00 | 1 |
+| Sao Hỏa (Mars) | 1.52 | 3389.5 | 1.88 | 2 |
+| Sao Mộc (Jupiter) | 5.20 | 69911.0 | 11.86 | 95 |
+| Sao Thổ (Saturn) | 9.58 | 58232.0 | 29.45 | 146 |
+| Sao Thiên Vương (Uranus) | 19.22 | 25362.0 | 84.02 | 28 |
+| Sao Hải Vương (Neptune) | 30.05 | 24622.0 | 164.79 | 16 |
+
+Ghi chú phân tích:
+1. Sao Mộc là hành tinh có bán kính lớn nhất (69,911 km) và Sao Thủy là nhỏ nhất (2,439.7 km).
+2. Sao Thổ hiện có số lượng vệ tinh tự nhiên nhiều nhất đã được xác nhận (146 vệ tinh).
+3. Hai hành tinh không có bất kỳ vệ tinh tự nhiên nào là Sao Thủy và Sao Kim.
+4. Sao Hải Vương có chu kỳ quỹ đạo quanh Mặt Trời dài nhất (164.79 năm).

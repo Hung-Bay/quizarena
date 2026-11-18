@@ -327,5 +327,55 @@ def smoke_test(
     typer.echo("\n[✓] SMOKE TEST THÀNH CÔNG RỰC RỠ! Toàn bộ chuỗi dịch vụ hoạt động hoàn hảo.")
 
 
+@app.command("eval-quizgen")
+def eval_quizgen(
+    samples_dir: str = typer.Option(
+        "evals/samples", "--samples", "-s", help="Thư mục chứa các tài liệu mẫu benchmark"
+    ),
+    questions_per_doc: int = typer.Option(
+        5, "--questions", "-q", help="Số câu hỏi yêu cầu sinh cho mỗi tài liệu"
+    ),
+    output_dir: str = typer.Option(
+        "evals/results", "--output", "-o", help="Thư mục lưu trữ kết quả đánh giá JSON"
+    ),
+) -> None:
+    """Benchmark đánh giá chất lượng sinh bộ câu hỏi AI (Phase 7 - §7.12 mục 9 & §10.3)."""
+    from app.game.eval_runner import QuizGenEvaluator
+
+    typer.echo("======================================================================")
+    typer.echo("  QUIZARENA AI GENERATION EVALUATION RUNNER (BENCHMARK §10.3)")
+    typer.echo(f"  Thư mục tài liệu mẫu : {samples_dir}")
+    typer.echo(f"  Số câu / tài liệu    : {questions_per_doc}")
+    typer.echo(f"  Thư mục xuất báo cáo : {output_dir}")
+    typer.echo("======================================================================")
+
+    evaluator = QuizGenEvaluator(samples_dir=samples_dir, output_dir=output_dir)
+    try:
+        summary = asyncio.run(evaluator.run_evaluation(num_questions_per_doc=questions_per_doc))
+    except Exception as e:
+        typer.echo(f"\n[!] LỖI THỰC THI EVALUATION: {e}", err=True)
+        raise typer.Exit(code=1) from e
+
+    typer.echo("\n--- BÁO CÁO KẾT QUẢ ĐÁNH GIÁ (EVALUATION REPORT) ---")
+    typer.echo(f"Mã đợt đánh giá (Eval ID) : {summary.eval_id}")
+    typer.echo(f"Thời điểm thực hiện       : {summary.timestamp}")
+    typer.echo(f"Mô hình AI sử dụng        : {summary.model_name} (chế độ: {summary.gateway_mode})")
+    typer.echo(f"Commit SHA phiên bản      : {summary.commit_sha}")
+    typer.echo(f"Tổng số tài liệu đánh giá : {summary.total_documents}")
+    typer.echo(
+        f"Tổng số câu hỏi sinh ra   : {summary.total_questions_generated} / {summary.total_questions_requested}"
+    )
+    typer.echo("----------------------------------------------------------------------")
+    typer.echo(f"1. Tỷ lệ JSON hợp lệ (% Valid JSON)        : {summary.json_validity_pct:.1f}%")
+    typer.echo(f"2. Tỷ lệ qua luật nghiệp vụ (% Business)   : {summary.business_pass_pct:.1f}%")
+    typer.echo(f"3. Tỷ lệ câu Host giữ nguyên (% Host Keep) : {summary.host_keep_pct:.1f}%")
+    typer.echo(f"4. Độ trễ trung bình mỗi tài liệu (Latency): {summary.avg_latency_ms:.1f}ms")
+    typer.echo(
+        f"5. Token tiêu thụ trung bình / tài liệu   : {summary.avg_tokens_per_doc:.0f} tokens"
+    )
+    typer.echo("======================================================================")
+    typer.echo(f"[✓] Đã xuất báo cáo chi tiết vào thư mục '{output_dir}'.\n")
+
+
 if __name__ == "__main__":
     app()

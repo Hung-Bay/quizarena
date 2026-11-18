@@ -1,0 +1,143 @@
+{
+  "eval_id": "eval_20261118_070247",
+  "timestamp": "2026-11-18T07:02:47.459104+00:00",
+  "commit_sha": "ce443ed194",
+  "model_name": "gemini-3.5-flash",
+  "gateway_mode": "real",
+  "total_documents": 5,
+  "total_questions_requested": 15,
+  "total_questions_generated": 15,
+  "total_questions_valid": 9,
+  "total_questions_rejected": 6,
+  "json_validity_pct": 100.0,
+  "business_pass_pct": 60.0,
+  "host_keep_pct": 57.0,
+  "avg_latency_ms": 37533.801520004636,
+  "avg_tokens_per_doc": 2737.6,
+  "details": [
+    {
+      "doc_name": "01_vietnamese_geography.txt",
+      "doc_lang": "vi",
+      "char_count": 798,
+      "num_questions_requested": 3,
+      "num_questions_generated": 3,
+      "is_json_valid": true,
+      "num_questions_valid": 0,
+      "num_questions_rejected": 3,
+      "latency_ms": 33983.562200010056,
+      "input_tokens": 726,
+      "output_tokens": 626,
+      "total_tokens": 3363,
+      "errors": [],
+      "rejection_reasons": [
+        {
+          "question_index": 1,
+          "content": "Khí quyển Trái Đất bao gồm hai thành phần khí nào chiếm tỉ lệ lớn nhất?",
+          "errors": [
+            "Trang tham chiếu source_ref (5) nằm ngoài số trang tài liệu (1)"
+          ]
+        },
+        {
+          "question_index": 2,
+          "content": "Những phát biểu nào sau đây đúng về đặc điểm chuyển động của Trái Đất và Mặt Trăng?",
+          "errors": [
+            "Trang tham chiếu source_ref (6) nằm ngoài số trang tài liệu (1)"
+          ]
+        },
+        {
+          "question_index": 3,
+          "content": "Lực hấp dẫn của Mặt Trăng tạo ra hiện tượng thủy triều trên các đại dương của Trái Đất.",
+          "errors": [
+            "Trang tham chiếu source_ref (9) nằm ngoài số trang tài liệu (1)"
+          ]
+        }
+      ]
+    },
+    {
+      "doc_name": "02_english_python.txt",
+      "doc_lang": "en",
+      "char_count": 883,
+      "num_questions_requested": 3,
+      "num_questions_generated": 3,
+      "is_json_valid": true,
+      "num_questions_valid": 3,
+      "num_questions_rejected": 0,
+      "latency_ms": 57497.6575000037,
+      "input_tokens": 692,
+      "output_tokens": 395,
+      "total_tokens": 2009,
+      "errors": [],
+      "rejection_reasons": []
+    },
+    {
+      "doc_name": "03_table_solar_system.txt",
+      "doc_lang": "vi",
+      "char_count": 1027,
+      "num_questions_requested": 3,
+      "num_questions_generated": 3,
+      "is_json_valid": true,
+      "num_questions_valid": 0,
+      "num_questions_rejected": 3,
+      "latency_ms": 48002.14759999653,
+      "input_tokens": 977,
+      "output_tokens": 726,
+      "total_tokens": 2740,
+      "errors": [],
+      "rejection_reasons": [
+        {
+          "question_index": 1,
+          "content": "Hành tinh nào trong Hệ Mặt Trời sở hữu số lượng vệ tinh tự nhiên nhiều nhất?",
+          "errors": [
+            "Trang tham chiếu source_ref (2) nằm ngoài số trang tài liệu (1)"
+          ]
+        },
+        {
+          "question_index": 2,
+          "content": "Những hành tinh nào sau đây KHÔNG có bất kỳ vệ tinh tự nhiên nào?",
+          "errors": [
+            "Trang tham chiếu source_ref (3) nằm ngoài số trang tài liệu (1)"
+          ]
+        },
+        {
+          "question_index": 3,
+          "content": "Sao Hải Vương là hành tinh có chu kỳ quỹ đạo quanh Mặt Trời ngắn nhất trong Hệ Mặt Trời.",
+          "errors": [
+            "Trang tham chiếu source_ref (4) nằm ngoài số trang tài liệu (1)"
+          ]
+        }
+      ]
+    },
+    {
+      "doc_name": "04_vietnamese_economy.txt",
+      "doc_lang": "vi",
+      "char_count": 917,
+      "num_questions_requested": 3,
+      "num_questions_generated": 3,
+      "is_json_valid": true,
+      "num_questions_valid": 3,
+      "num_questions_rejected": 0,
+      "latency_ms": 19807.235500018578,
+      "input_tokens": 752,
+      "output_tokens": 589,
+      "total_tokens": 2952,
+      "errors": [],
+      "rejection_reasons": []
+    },
+    {
+      "doc_name": "05_english_technical.txt",
+      "doc_lang": "en",
+      "char_count": 1158,
+      "num_questions_requested": 3,
+      "num_questions_generated": 3,
+      "is_json_valid": true,
+      "num_questions_valid": 3,
+      "num_questions_rejected": 0,
+      "latency_ms": 28378.404799994314,
+      "input_tokens": 714,
+      "output_tokens": 484,
+      "total_tokens": 2624,
+      "errors": [],
+      "rejection_reasons": []
+    }
+  ]
+}
