@@ -103,11 +103,31 @@ async def build_game_snapshot(
         except Exception as exc:  # noqa: BLE001
             log.debug("Lỗi khi đọc điểm cá nhân của %s: %s", client_id, exc)
 
+    # 5. Lấy mã PIN và danh sách người chơi trong phòng (GM-10)
+    pin = state.get("pin")
+    players_data: list[dict[str, Any]] = []
+    raw_players = await redis.hgetall(f"game:{game_id}:players")  # type: ignore[misc]
+    if raw_players:
+        for p_id, p_json in raw_players.items():
+            try:
+                p_dict = json.loads(p_json)
+                players_data.append(
+                    {
+                        "id": p_dict.get("client_id", p_id),
+                        "nickname": p_dict.get("nickname", "Ẩn danh"),
+                    }
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
     snapshot_obj = GameSnapshotData(
         game_id=uuid.UUID(game_id),
         status=status,
         q_index=q_index,
         total_questions=total_questions,
+        pin=pin,
+        player_count=len(players_data),
+        players=players_data,
         current_question=current_question,
         current_result=None,
         player_score=player_score,

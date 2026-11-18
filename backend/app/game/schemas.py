@@ -117,6 +117,9 @@ class GameSnapshotData(BaseModel):
     status: str
     q_index: int
     total_questions: int
+    pin: str | None = None
+    player_count: int = 0
+    players: list[dict[str, Any]] = Field(default_factory=list)
     current_question: QuestionStartData | None = None
     current_result: QuestionResultData | None = None
     player_score: int = 0

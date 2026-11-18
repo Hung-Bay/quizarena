@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useGameSocket } from "../hooks/useGameSocket";
 import {
@@ -49,6 +49,8 @@ const COLOR_CLASSES = [
 export const HostGamePage: React.FC = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const initialPin = (location.state as { pin?: string } | null)?.pin;
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const {
@@ -57,7 +59,7 @@ export const HostGamePage: React.FC = () => {
     hostNextQuestion,
     hostEndGame,
     hostKickPlayer,
-  } = useGameSocket(gameId || "");
+  } = useGameSocket(gameId || "", null, initialPin);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {

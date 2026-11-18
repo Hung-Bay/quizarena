@@ -228,8 +228,15 @@ function gameReducer(state: GameState, action: Action): GameState {
   }
 }
 
-export function useGameSocket(gameId: string, customToken?: string | null) {
-  const [state, dispatch] = useReducer(gameReducer, initialState);
+export function useGameSocket(
+  gameId: string,
+  customToken?: string | null,
+  initialPin?: string
+) {
+  const [state, dispatch] = useReducer(gameReducer, {
+    ...initialState,
+    pin: initialPin || "",
+  });
 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectAttemptRef = useRef(0);
@@ -329,6 +336,9 @@ export function useGameSocket(gameId: string, customToken?: string | null) {
       if (!isMountedRef.current) return;
       reconnectAttemptRef.current = 0;
       dispatch({ type: "SET_CONNECTION_STATUS", payload: "connected" });
+
+      // Gửi snapshot.request để đồng bộ trạng thái mới nhất ngay khi kết nối
+      sendMessage(buildSnapshotRequest());
 
       // Bật heartbeat định kỳ mỗi 15s
       if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
