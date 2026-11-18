@@ -23,6 +23,19 @@ if [ ! -d "$PROJECT_DIR" ]; then
 fi
 
 cd "$PROJECT_DIR"
+
+# ==============================================================================
+# Bảo vệ tương tranh (Concurrency Protection via flock)
+# Dùng chung file lock với Autoscaler để tránh xung đột cập nhật replica
+# ==============================================================================
+LOCK_FILE="/var/lock/quizarena_deploy.lock"
+mkdir -p "$(dirname "$LOCK_FILE")" 2>/dev/null || LOCK_FILE="$PROJECT_DIR/.quizarena_deploy.lock"
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  echo "LỖI: Một tiến trình deploy khác đang chạy hoặc lockfile đang bị giữ ($LOCK_FILE)." >&2
+  exit 1
+fi
+
 echo ">>> [1/6] Bắt đầu deploy phiên bản SHA: $TARGET_SHA tại $PROJECT_DIR"
 
 # Đảm bảo luôn truyền -f docker-compose.yml để không nạp nhầm docker-compose.override.yml
