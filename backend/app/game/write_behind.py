@@ -63,7 +63,7 @@ async def flush_answers_to_db(
 
             # Ánh xạ pid_str sang player_id nếu nó là user_id
             if pid_str not in user_to_player_cache:
-                mapped_pid = await redis.hget(f"game:{gid_str}:user_to_player", pid_str)
+                mapped_pid = await redis.hget(f"game:{gid_str}:user_to_player", pid_str)  # type: ignore[misc]
                 if not mapped_pid:
                     try:
                         u_uuid = uuid.UUID(pid_str)
@@ -169,7 +169,7 @@ async def finalize_game_session(
     for rank_idx, (pid_str, score_val) in enumerate(all_players, start=1):
         # Kiểm tra nếu pid_str là user_id thay vì player_id
         resolved_pid = pid_str
-        mapped_pid = await redis.hget(f"game:{gid_str}:user_to_player", pid_str)
+        mapped_pid = await redis.hget(f"game:{gid_str}:user_to_player", pid_str)  # type: ignore[misc]
         if mapped_pid:
             resolved_pid = mapped_pid
         else:
@@ -187,7 +187,7 @@ async def finalize_game_session(
         pid_uuid = uuid.UUID(resolved_pid)
         nick = (
             await redis.hget(f"game:{gid_str}:nicknames", resolved_pid)  # type: ignore[misc]
-            or await redis.hget(f"game:{gid_str}:nicknames", pid_str)
+            or await redis.hget(f"game:{gid_str}:nicknames", pid_str)  # type: ignore[misc]
             or None
         )
         if not nick:
@@ -198,7 +198,7 @@ async def finalize_game_session(
 
         streak_val = (
             await redis.hget(f"game:{gid_str}:streaks", resolved_pid)  # type: ignore[misc]
-            or await redis.hget(f"game:{gid_str}:streaks", pid_str)
+            or await redis.hget(f"game:{gid_str}:streaks", pid_str)  # type: ignore[misc]
             or 0
         )
 

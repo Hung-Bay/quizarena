@@ -375,8 +375,12 @@ async def join_game(
         # Nếu chính user đã đăng nhập này tham gia lại -> Cho phép tái sử dụng (reconnect)
         if current_user and existing_info.get("user_id") == str(current_user.id):
             player_id = uuid.UUID(existing_info["id"])
-            await redis.hset(f"game:{game_id}:user_to_player", str(current_user.id), str(player_id))
-            await redis.hset(f"game:{game_id}:nicknames", str(current_user.id), clean_nickname)
+            await redis.hset(  # type: ignore[misc]
+                f"game:{game_id}:user_to_player", str(current_user.id), str(player_id)
+            )
+            await redis.hset(  # type: ignore[misc]
+                f"game:{game_id}:nicknames", str(current_user.id), clean_nickname
+            )
             roles = await user_repository.get_roles(session, current_user.id)
             perms = await user_repository.get_permissions(session, current_user.id)
             if "game:play" not in perms:

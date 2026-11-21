@@ -11,6 +11,7 @@ Tuân thủ nghiêm ngặt quy định kiến trúc ADR-002:
 import asyncio
 import logging
 import re
+from functools import partial
 from typing import Any
 
 from google import genai
@@ -249,8 +250,9 @@ class GeminiGateway(GeminiGatewayProtocol):
                 res = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda m=active_model: self.client.models.generate_content(
-                            model=m,
+                        partial(
+                            self.client.models.generate_content,
+                            model=active_model,
                             contents=contents,
                             config=config,
                         ),
@@ -344,8 +346,9 @@ class GeminiGateway(GeminiGatewayProtocol):
                 res = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda m=active_model: self.client.models.generate_content(
-                            model=m,
+                        partial(
+                            self.client.models.generate_content,
+                            model=active_model,
                             contents=contents,
                             config=config,
                         ),
@@ -461,8 +464,9 @@ class GeminiGateway(GeminiGatewayProtocol):
                 res = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda m=active_model: self.client.models.generate_content(
-                            model=m,
+                        partial(
+                            self.client.models.generate_content,
+                            model=active_model,
                             contents=[prompt],
                             config=config,
                         ),
@@ -544,8 +548,9 @@ class GeminiGateway(GeminiGatewayProtocol):
                 res = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda m=active_model: self.client.models.generate_content(
-                            model=m,
+                        partial(
+                            self.client.models.generate_content,
+                            model=active_model,
                             contents=[prompt],
                             config=config,
                         ),

@@ -25,11 +25,14 @@ from app.models.game import GameSession, PlayerAnswer
 class QuestionStat(TypedDict):
     question_id: str
     q_index: int
+    question_index: int
     content: str
+    question_text: str
     topic: str
     total_answers: int
     correct_answers: int
     accuracy_rate: float
+    correct_percentage: float
     average_response_ms: float
     option_distribution: dict[str, int]
 
@@ -37,6 +40,7 @@ class QuestionStat(TypedDict):
 class TopicStat(TypedDict):
     topic: str
     total_answers: int
+    total_questions: int
     correct_answers: int
     accuracy_rate: float
     mastery_level: str

@@ -103,7 +103,7 @@ async def build_game_snapshot(
                 player_rank = rank_val + 1
 
             if q_index > 0:
-                is_ans = await redis.sismember(f"game:{game_id}:q:{q_index}:answered", client_id)
+                is_ans = await redis.sismember(f"game:{game_id}:q:{q_index}:answered", client_id)  # type: ignore[misc]
                 has_answered = bool(is_ans)
         except Exception as exc:  # noqa: BLE001
             log.debug("Lỗi khi đọc điểm cá nhân của %s: %s", client_id, exc)
