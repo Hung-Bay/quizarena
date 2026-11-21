@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   RefreshCw,
   ArrowLeft,
+  Home,
   Users,
   Target,
   BookOpen,
@@ -22,17 +23,21 @@ import { SafeMarkdown } from '../components/SafeMarkdown'
 
 interface TopicStat {
   topic: string
-  total_questions: number
+  total_questions?: number
+  total_answers?: number
   accuracy_rate: number
-  mastery_level: 'mastered' | 'review_needed' | 'struggling'
+  mastery_level: string
 }
 
 interface QuestionStat {
-  question_index: number
-  question_text: string
+  question_index?: number
+  q_index?: number
+  question_text?: string
+  content?: string
   topic: string
-  correct_percentage: number
-  option_distribution: Record<string, number>
+  correct_percentage?: number
+  accuracy_rate?: number
+  option_distribution?: Record<string, number>
 }
 
 interface PersonalFeedback {
@@ -40,14 +45,18 @@ interface PersonalFeedback {
   nickname: string
   final_score: number
   final_rank: number
-  total_participants: number
-  correct_answers: number
-  total_questions: number
+  total_participants?: number
+  correct_answers?: number
+  correct_answers_count?: number
+  total_questions?: number
   accuracy_rate: number
-  performance_level: 'excellent' | 'good' | 'needs_improvement'
-  weak_topics: string[]
-  advice_list: string[]
-  encouragement: string
+  performance_level?: 'excellent' | 'good' | 'needs_improvement' | string
+  weak_topics?: string[]
+  wrong_topics?: string[]
+  advice_list?: string[]
+  learning_advice?: string
+  encouragement?: string
+  evaluation?: string
 }
 
 interface GameReportData {
@@ -57,14 +66,15 @@ interface GameReportData {
   stats: {
     total_players: number
     total_questions: number
-    average_score: number
-    overall_accuracy_rate: number
-    topic_stats: TopicStat[]
-    question_stats: QuestionStat[]
+    average_score?: number
+    overall_accuracy_rate?: number
+    overall_accuracy?: number
+    topic_stats?: TopicStat[]
+    question_stats?: QuestionStat[]
   }
   summary: string | null
-  strengths: string[] | null
-  weaknesses: string[] | null
+  strengths: any[] | null
+  weaknesses: any[] | null
   advice_for_host: string | null
   advice_for_learner: string | null
   personal_feedback: PersonalFeedback | null
@@ -83,6 +93,8 @@ export const GameReportPage: React.FC = () => {
     queryKey: ['gameReport', gameId],
     queryFn: () => apiRequest<GameReportData>(`/api/v1/games/${gameId}/report`),
     enabled: !!gameId,
+    retry: 5,
+    retryDelay: 2000,
     refetchInterval: (query) => {
       // Nếu report đang ở trạng thái pending thì tự động poll mỗi 3s
       return query.state.data?.status === 'pending' ? 3000 : false
@@ -110,7 +122,7 @@ export const GameReportPage: React.FC = () => {
     }
   }, [report])
 
-  if (isLoading) {
+  if (isLoading || report?.status === 'pending') {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6">
         <RefreshCw className="w-10 h-10 text-indigo-400 animate-spin mb-4" />
@@ -190,6 +202,13 @@ export const GameReportPage: React.FC = () => {
               </button>
             )}
             <button
+              onClick={() => navigate('/')}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition flex items-center gap-1.5"
+            >
+              <Home className="w-3.5 h-3.5" />
+              <span>Trang chủ</span>
+            </button>
+            <button
               onClick={() => navigate('/join')}
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition"
             >
@@ -265,7 +284,9 @@ export const GameReportPage: React.FC = () => {
                   <h2 className="text-2xl sm:text-3xl font-extrabold text-white">
                     Chào, {report.personal_feedback.nickname}!
                   </h2>
-                  <p className="text-sm text-slate-400 mt-1">{report.personal_feedback.encouragement}</p>
+                  <p className="text-sm text-slate-400 mt-1">
+                    {report.personal_feedback.encouragement || report.personal_feedback.evaluation || 'Hoàn thành bài thi!'}
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -278,7 +299,7 @@ export const GameReportPage: React.FC = () => {
                       #{report.personal_feedback.final_rank}
                     </div>
                     <div className="text-xs text-slate-400 uppercase tracking-wider mt-1">
-                      Hạng / {report.personal_feedback.total_participants}
+                      Hạng / {report.personal_feedback.total_participants ?? report.stats?.total_players ?? 1}
                     </div>
                   </div>
 
@@ -297,21 +318,22 @@ export const GameReportPage: React.FC = () => {
                 <div className="bg-slate-950/40 rounded-xl p-3 text-center">
                   <div className="text-xs text-slate-400">Số câu đúng</div>
                   <div className="text-lg font-bold text-white mt-1">
-                    {report.personal_feedback.correct_answers} / {report.personal_feedback.total_questions}
+                    {report.personal_feedback.correct_answers ?? report.personal_feedback.correct_answers_count ?? 0} /{' '}
+                    {report.personal_feedback.total_questions ?? report.stats?.total_questions ?? 0}
                   </div>
                 </div>
                 <div className="bg-slate-950/40 rounded-xl p-3 text-center">
                   <div className="text-xs text-slate-400">Tỷ lệ chính xác</div>
                   <div className="text-lg font-bold text-indigo-300 mt-1">
-                    {Math.round(report.personal_feedback.accuracy_rate * 100)}%
+                    {Math.round((report.personal_feedback.accuracy_rate ?? 0) * 100)}%
                   </div>
                 </div>
                 <div className="col-span-2 sm:col-span-1 bg-slate-950/40 rounded-xl p-3 text-center">
                   <div className="text-xs text-slate-400">Đánh giá chung</div>
                   <div className="text-lg font-bold text-amber-300 mt-1 capitalize">
-                    {report.personal_feedback.performance_level === 'excellent'
+                    {report.personal_feedback.performance_level === 'excellent' || (report.personal_feedback.accuracy_rate ?? 0) >= 0.8
                       ? 'Xuất sắc'
-                      : report.personal_feedback.performance_level === 'good'
+                      : report.personal_feedback.performance_level === 'good' || (report.personal_feedback.accuracy_rate ?? 0) >= 0.5
                       ? 'Khá giỏi'
                       : 'Cần nỗ lực hơn'}
                   </div>
@@ -326,42 +348,56 @@ export const GameReportPage: React.FC = () => {
                 Lời Khuyên Ôn Tập Dành Cho Bạn
               </h3>
 
-              {report.personal_feedback.advice_list && report.personal_feedback.advice_list.length > 0 ? (
-                <div className="space-y-3">
-                  {report.personal_feedback.advice_list.map((advice, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-start gap-3 p-3.5 bg-slate-800/50 border border-slate-800 rounded-2xl text-slate-300 text-sm"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      <div>{advice}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 bg-emerald-950/30 border border-emerald-500/30 rounded-2xl text-emerald-300 text-sm">
-                  Bạn đã trả lời xuất sắc tất cả các chủ đề trong trận đấu này! Tiếp tục duy trì phong độ nhé!
-                </div>
-              )}
-
-              {/* Danh sách chủ đề cần củng cố */}
-              {report.personal_feedback.weak_topics && report.personal_feedback.weak_topics.length > 0 && (
-                <div className="mt-6 pt-4 border-t border-slate-800">
-                  <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">
-                    Các chủ đề trả lời chưa chính xác:
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {report.personal_feedback.weak_topics.map((t, idx) => (
-                      <span
+              {(() => {
+                const adviceItems = (report.personal_feedback.advice_list && report.personal_feedback.advice_list.length > 0)
+                  ? report.personal_feedback.advice_list
+                  : report.personal_feedback.learning_advice
+                  ? [report.personal_feedback.learning_advice]
+                  : []
+                return adviceItems.length > 0 ? (
+                  <div className="space-y-3">
+                    {adviceItems.map((advice, idx) => (
+                      <div
                         key={idx}
-                        className="px-3 py-1 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold rounded-lg"
+                        className="flex items-start gap-3 p-3.5 bg-slate-800/50 border border-slate-800 rounded-2xl text-slate-300 text-sm"
                       >
-                        {t}
-                      </span>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        <div>{advice}</div>
+                      </div>
                     ))}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="p-4 bg-emerald-950/30 border border-emerald-500/30 rounded-2xl text-emerald-300 text-sm">
+                    Bạn đã trả lời xuất sắc tất cả các chủ đề trong trận đấu này! Tiếp tục duy trì phong độ nhé!
+                  </div>
+                )
+              })()}
+
+              {/* Danh sách chủ đề cần củng cố */}
+              {(() => {
+                const weakTopics = report.personal_feedback.weak_topics?.length
+                  ? report.personal_feedback.weak_topics
+                  : report.personal_feedback.wrong_topics?.length
+                  ? report.personal_feedback.wrong_topics
+                  : []
+                return weakTopics.length > 0 ? (
+                  <div className="mt-6 pt-4 border-t border-slate-800">
+                    <div className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">
+                      Các chủ đề trả lời chưa chính xác:
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {weakTopics.map((t, idx) => (
+                        <span
+                          key={idx}
+                          className="px-3 py-1 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold rounded-lg"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null
+              })()}
             </div>
           </div>
         )}
@@ -377,7 +413,7 @@ export const GameReportPage: React.FC = () => {
                   <Users className="w-4 h-4 text-indigo-400" />
                 </div>
                 <div className="text-2xl font-bold text-white mt-2">
-                  {report.stats.total_players}
+                  {report.stats?.total_players ?? 0}
                 </div>
               </div>
 
@@ -387,7 +423,7 @@ export const GameReportPage: React.FC = () => {
                   <Trophy className="w-4 h-4 text-amber-400" />
                 </div>
                 <div className="text-2xl font-bold text-white mt-2">
-                  {Math.round(report.stats.average_score).toLocaleString()}
+                  {Math.round(report.stats?.average_score ?? 0).toLocaleString()}
                 </div>
               </div>
 
@@ -397,7 +433,7 @@ export const GameReportPage: React.FC = () => {
                   <Target className="w-4 h-4 text-emerald-400" />
                 </div>
                 <div className="text-2xl font-bold text-emerald-400 mt-2">
-                  {Math.round(report.stats.overall_accuracy_rate * 100)}%
+                  {Math.round(((report.stats?.overall_accuracy_rate ?? report.stats?.overall_accuracy ?? 0) * 100))}%
                 </div>
               </div>
 
@@ -407,7 +443,7 @@ export const GameReportPage: React.FC = () => {
                   <HelpCircle className="w-4 h-4 text-cyan-400" />
                 </div>
                 <div className="text-2xl font-bold text-white mt-2">
-                  {report.stats.total_questions}
+                  {report.stats?.total_questions ?? 0}
                 </div>
               </div>
             </div>
@@ -436,12 +472,19 @@ export const GameReportPage: React.FC = () => {
                   </h4>
                   {report.strengths && report.strengths.length > 0 ? (
                     <ul className="space-y-2 text-xs text-slate-300">
-                      {report.strengths.map((s, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="text-emerald-400 font-bold">•</span>
-                          <span>{s}</span>
-                        </li>
-                      ))}
+                      {report.strengths.map((s: any, idx: number) => {
+                        const analysis = typeof s === 'string' ? s : s?.analysis || s?.topic || JSON.stringify(s)
+                        const topic = typeof s === 'object' && s?.topic && s.analysis ? s.topic : null
+                        return (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span className="text-emerald-400 font-bold">•</span>
+                            <div>
+                              {topic && <span className="font-semibold text-emerald-300 mr-1.5">[{topic}]</span>}
+                              <span>{analysis}</span>
+                            </div>
+                          </li>
+                        )
+                      })}
                     </ul>
                   ) : (
                     <p className="text-xs text-slate-500">Chưa ghi nhận điểm mạnh đặc thù.</p>
@@ -455,12 +498,19 @@ export const GameReportPage: React.FC = () => {
                   </h4>
                   {report.weaknesses && report.weaknesses.length > 0 ? (
                     <ul className="space-y-2 text-xs text-slate-300">
-                      {report.weaknesses.map((w, idx) => (
-                        <li key={idx} className="flex items-start gap-2">
-                          <span className="text-rose-400 font-bold">•</span>
-                          <span>{w}</span>
-                        </li>
-                      ))}
+                      {report.weaknesses.map((w: any, idx: number) => {
+                        const analysis = typeof w === 'string' ? w : w?.analysis || w?.topic || JSON.stringify(w)
+                        const topic = typeof w === 'object' && w?.topic && w.analysis ? w.topic : null
+                        return (
+                          <li key={idx} className="flex items-start gap-2">
+                            <span className="text-rose-400 font-bold">•</span>
+                            <div>
+                              {topic && <span className="font-semibold text-rose-300 mr-1.5">[{topic}]</span>}
+                              <span>{analysis}</span>
+                            </div>
+                          </li>
+                        )
+                      })}
                     </ul>
                   ) : (
                     <p className="text-xs text-slate-500">Lớp học không có điểm yếu nghiêm trọng.</p>
@@ -498,12 +548,13 @@ export const GameReportPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60">
-                    {report.stats.topic_stats?.map((topic, idx) => {
-                      const pct = Math.round(topic.accuracy_rate * 100)
+                    {report.stats?.topic_stats?.map((topic, idx) => {
+                      const pct = Math.round((topic.accuracy_rate ?? 0) * 100)
+                      const qCount = topic.total_questions ?? topic.total_answers ?? 0
                       return (
                         <tr key={idx} className="hover:bg-slate-800/30 transition">
                           <td className="py-3.5 px-4 font-medium text-white">{topic.topic}</td>
-                          <td className="py-3.5 px-4 text-slate-400">{topic.total_questions}</td>
+                          <td className="py-3.5 px-4 text-slate-400">{qCount}</td>
                           <td className="py-3.5 px-4">
                             <div className="flex items-center gap-3">
                               <div className="w-24 bg-slate-800 rounded-full h-2 overflow-hidden">
@@ -522,14 +573,14 @@ export const GameReportPage: React.FC = () => {
                               className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
                                 topic.mastery_level === 'mastered'
                                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                  : topic.mastery_level === 'review_needed'
+                                  : topic.mastery_level === 'review_needed' || topic.mastery_level === 'developing'
                                   ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                                   : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
                               }`}
                             >
                               {topic.mastery_level === 'mastered'
                                 ? 'Đã thành thạo'
-                                : topic.mastery_level === 'review_needed'
+                                : topic.mastery_level === 'review_needed' || topic.mastery_level === 'developing'
                                 ? 'Cần ôn tập'
                                 : 'Đang yếu'}
                             </span>
@@ -550,8 +601,10 @@ export const GameReportPage: React.FC = () => {
               </h3>
 
               <div className="space-y-4">
-                {report.stats.question_stats?.map((q, idx) => {
-                  const correctPct = Math.round(q.correct_percentage * 100)
+                {report.stats?.question_stats?.map((q, idx) => {
+                  const correctPct = Math.round((q.correct_percentage ?? q.accuracy_rate ?? 0) * 100)
+                  const qNum = q.question_index !== undefined ? q.question_index + 1 : q.q_index ?? idx + 1
+                  const qText = q.question_text || q.content || 'Câu hỏi'
                   return (
                     <div
                       key={idx}
@@ -560,9 +613,9 @@ export const GameReportPage: React.FC = () => {
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-400 text-xs font-bold flex items-center justify-center shrink-0">
-                            #{q.question_index + 1}
+                            #{qNum}
                           </span>
-                          <span className="text-sm font-semibold text-white">{q.question_text}</span>
+                          <span className="text-sm font-semibold text-white">{qText}</span>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-xs text-slate-400">Đúng:</span>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -135,6 +136,23 @@ async def get_game_report(
     stmt = select(GameReport).where(GameReport.session_id == id)
     report = (await session.execute(stmt)).scalar_one_or_none()
     if not report:
+        # Kiểm tra xem trận đấu đã kết thúc chưa
+        stmt_game = select(GameSession).where(GameSession.id == id)
+        game = (await session.execute(stmt_game)).scalar_one_or_none()
+        if game and (game.status == "finished" or game.ended_at is not None):
+            return GameReportResponse(
+                id=uuid.uuid4(),
+                session_id=id,
+                status="pending",
+                stats={},
+                summary="Đang tổng hợp báo cáo trận đấu...",
+                strengths=[],
+                weaknesses=[],
+                advice_for_host="",
+                advice_for_learner="",
+                personal_feedback=None,
+                created_at=datetime.now(UTC),
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Báo cáo chưa sẵn sàng hoặc không tồn tại.",

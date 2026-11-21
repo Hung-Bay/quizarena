@@ -92,11 +92,13 @@ class QuestionResultData(BaseModel):
     leaderboard: list[LeaderboardEntry] = Field(
         default_factory=list, description="Top 10 người dẫn đầu"
     )
+    podium: list[dict[str, Any]] = Field(default_factory=list)
     # Phần cá nhân hóa cho từng player connection
     player_points_awarded: int | None = None
     player_total_score: int | None = None
     player_rank: int | None = None
     player_streak: int | None = None
+    personal: dict[str, Any] | None = None
 
 
 class GameFinishedData(BaseModel):
@@ -117,12 +119,17 @@ class GameSnapshotData(BaseModel):
     status: str
     q_index: int
     total_questions: int
+    pin: str | None = None
+    player_count: int = 0
+    players: list[dict[str, Any]] = Field(default_factory=list)
+    has_answered: bool = False
     current_question: QuestionStartData | None = None
     current_result: QuestionResultData | None = None
     player_score: int = 0
     player_streak: int = 0
     player_rank: int | None = None
     is_host: bool = False
+    personal: dict[str, Any] | None = None
 
 
 # =========================================================================

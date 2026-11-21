@@ -27,6 +27,7 @@ Tuân thủ nghiêm ngặt các tiêu chí nghiệm thu Thứ Tư & SRS:
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from typing import Any
 
@@ -39,7 +40,7 @@ from starlette.websockets import WebSocketDisconnect
 from app.game.enums import WSMessageType
 from app.main_realtime import app
 
-REDIS_TEST_URL = "redis://localhost:6379/0"
+REDIS_TEST_URL = os.getenv("REDIS_TEST_URL", "redis://localhost:6379/0")
 
 
 @pytest_asyncio.fixture

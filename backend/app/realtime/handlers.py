@@ -17,10 +17,11 @@ import uuid
 from typing import Any
 
 from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.logging import game_id_ctx, user_id_ctx
 from app.core.metrics import GAME_ANSWER_DURATION_SECONDS, GAME_ANSWERS_TOTAL
-from app.game import clock, lua_engine
+from app.game import clock, lua_engine, write_behind
 from app.game.enums import WSMessageType
 from app.game.schemas import (
     AnswerAckData,
@@ -37,9 +38,15 @@ log = logging.getLogger("app.realtime.handlers")
 class MessageHandler:
     """Điều phối và xử lý các loại thông điệp WebSocket."""
 
-    def __init__(self, manager: ConnectionManager, redis: Redis) -> None:
+    def __init__(
+        self,
+        manager: ConnectionManager,
+        redis: Redis,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+    ) -> None:
         self.manager = manager
         self.redis = redis
+        self.session_factory = session_factory
 
     async def handle_message(self, conn: ClientConnection, raw_text: str) -> None:
         """Parse envelope, kiểm tra phiên bản và định tuyến đến hàm xử lý tương ứng."""
@@ -275,7 +282,18 @@ class MessageHandler:
             )
             return
 
-        # Lấy top 3 Podium và tổng số người chơi
+        if self.session_factory:
+            try:
+                async with self.session_factory() as session:
+                    await write_behind.finalize_game_session(session, self.redis, game_id=game_id)
+                log.info(
+                    "Host đã kết thúc và finalize_game_session thành công cho trận %s", game_id
+                )
+                return
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Lỗi khi finalize_game_session cho %s: %s", game_id, exc)
+
+        # Fallback phát game.finished nếu không có session_factory hoặc finalize lỗi
         top_players = await self.redis.zrevrange(  # type: ignore[misc]
             f"game:{game_id}:lb", 0, 2, withscores=True
         )
@@ -384,8 +402,13 @@ class MessageHandler:
             await self._send_error(conn, code="BAD_MESSAGE", message="'q_index' phải là số nguyên")
             return
 
-        # Hỗ trợ cả selected_option_ids và option_ids
-        selected_options = data.get("selected_option_ids") or data.get("option_ids") or []
+        # Hỗ trợ cả selected_option_ids, option_ids và option_id (đơn lẻ)
+        selected_options = (
+            data.get("selected_option_ids")
+            or data.get("option_ids")
+            or ([data["option_id"]] if data.get("option_id") is not None else None)
+            or []
+        )
         if isinstance(selected_options, (str, int)):
             selected_options = [str(selected_options)]
         elif not isinstance(selected_options, list):

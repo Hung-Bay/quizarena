@@ -306,19 +306,34 @@ class ConnectionManager:
                 pipe.zscore(f"game:{game_id}:lb", p.client_id)
                 pipe.zrevrank(f"game:{game_id}:lb", p.client_id)
                 pipe.hget(f"game:{game_id}:streaks", p.client_id)
+                pipe.hget(f"game:{game_id}:q:{q_index}:pts:correct", p.client_id)
             pipe_results = await pipe.execute()
 
             for idx, p in enumerate(players):
-                pts = pipe_results[idx * 4]
-                score = pipe_results[idx * 4 + 1]
-                rank = pipe_results[idx * 4 + 2]
-                streak = pipe_results[idx * 4 + 3]
+                pts = pipe_results[idx * 5]
+                score = pipe_results[idx * 5 + 1]
+                rank = pipe_results[idx * 5 + 2]
+                streak = pipe_results[idx * 5 + 3]
+                corr = pipe_results[idx * 5 + 4]
+
+                pts_val = int(pts) if pts is not None else 0
+                score_val = int(score) if score is not None else 0
+                rank_val = (rank + 1) if rank is not None else 1
+                streak_val = int(streak) if streak is not None else 0
+                is_correct_val = (corr == "1") if corr is not None else (pts_val > 0)
 
                 p_data = dict(base_data)
-                p_data["player_points_awarded"] = int(pts) if pts is not None else 0
-                p_data["player_total_score"] = int(score) if score is not None else 0
-                p_data["player_rank"] = (rank + 1) if rank is not None else None
-                p_data["player_streak"] = int(streak) if streak is not None else 0
+                p_data["player_points_awarded"] = pts_val
+                p_data["player_total_score"] = score_val
+                p_data["player_rank"] = rank_val
+                p_data["player_streak"] = streak_val
+                p_data["personal"] = {
+                    "score": score_val,
+                    "added_score": pts_val,
+                    "streak": streak_val,
+                    "rank": rank_val,
+                    "is_correct": is_correct_val,
+                }
 
                 p_env = {"type": msg_type, "v": v, "seq": seq, "data": p_data}
                 tasks.append(asyncio.create_task(_safe_send_to(p, json.dumps(p_env))))
@@ -335,9 +350,16 @@ class ConnectionManager:
                 score = pipe_results[idx * 2]
                 rank = pipe_results[idx * 2 + 1]
 
+                score_val = int(score) if score is not None else 0
+                rank_val = (rank + 1) if rank is not None else 1
+
                 p_data = dict(base_data)
-                p_data["final_score"] = int(score) if score is not None else 0
-                p_data["final_rank"] = (rank + 1) if rank is not None else None
+                p_data["final_score"] = score_val
+                p_data["final_rank"] = rank_val
+                p_data["personal"] = {
+                    "score": score_val,
+                    "rank": rank_val,
+                }
 
                 p_env = {"type": msg_type, "v": v, "seq": seq, "data": p_data}
                 tasks.append(asyncio.create_task(_safe_send_to(p, json.dumps(p_env))))

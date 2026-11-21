@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.api.v1 import realtime
 from app.api.v1.realtime import redeem_ws_ticket
 from app.core.app_factory import create_app
+from app.core.db import create_engine, create_session_factory
 from app.core.logging import game_id_ctx, user_id_ctx
 from app.core.metrics import WS_CONNECTIONS, metrics_endpoint_response
 from app.core.redis import create_redis
@@ -37,11 +38,17 @@ _DEMO_HTML_PATH = Path(__file__).parent / "static" / "demo.html"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Khởi tạo Redis, ConnectionManager và quản lý chu trình Graceful Drain."""
+    """Khởi tạo Redis, DB engine, ConnectionManager và quản lý chu trình Graceful Drain."""
     app.state.is_draining = False
     app.state.redis = create_redis()
+    db_engine = create_engine()
+    session_factory = create_session_factory(db_engine)
+    app.state.db_engine = db_engine
+    app.state.session_factory = session_factory
     app.state.manager = ConnectionManager(app.state.redis)
-    app.state.handler = MessageHandler(app.state.manager, app.state.redis)
+    app.state.handler = MessageHandler(
+        app.state.manager, app.state.redis, session_factory=session_factory
+    )
 
     loop = asyncio.get_running_loop()
 
@@ -79,6 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.info("Lifespan shutdown: Bắt đầu drain và đóng mọi kết nối cục bộ")
         await app.state.manager.drain_and_close_all()
         await app.state.redis.aclose()
+        await db_engine.dispose()
         log.info("QuizArena Realtime service stopped")
 
 
@@ -191,15 +199,20 @@ async def game_websocket(
         if sub.startswith("guest:"):
             client_id = sub[len("guest:") :]
         else:
-            client_id = sub
+            # Tra cứu player_id nếu sub là user_id (tránh lệch ID giữa user_id và player_id)
+            mapped_pid = await redis.hget(f"game:{game_id}:user_to_player", sub)
+            client_id = mapped_pid if mapped_pid else sub
 
         # Kiểm tra người chơi có bị kick ban 10 phút không (FR-GAME-05)
-        if await redis.exists(f"game:{game_id}:kicked_ids:{client_id}"):
+        if await redis.exists(f"game:{game_id}:kicked_ids:{client_id}") or await redis.exists(
+            f"game:{game_id}:kicked_ids:{sub}"
+        ):
             await ws.close(code=4002, reason="KICKED")
             return
 
         nickname = (
             await redis.hget(f"game:{game_id}:nicknames", client_id)  # type: ignore[misc]
+            or (await redis.hget(f"game:{game_id}:nicknames", sub) if sub != client_id else None)
             or "Player"
         )
         if await redis.exists(f"game:{game_id}:kicked:{nickname.lower()}"):

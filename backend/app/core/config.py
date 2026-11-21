@@ -35,8 +35,10 @@ class Settings(BaseSettings):
 
     # --- Gemini (Phase 2) ---
     gemini_api_key: SecretStr | None = None
-    gemini_model_quiz: str = "gemini-3.5-flash"
-    gemini_model_report: str = "gemini-3.5-flash"
+    gemini_model_quiz: str = "gemini-3.5-flash-lite"
+    gemini_model_report: str = "gemini-3.5-flash-lite"
+    gemini_fallback_model: str = "gemini-3.5-flash-lite"
+    gemini_timeout_seconds: float = Field(default=180.0, gt=0)
     gemini_rpm: int | None = Field(default=15, gt=0)
     gemini_rpd: int | None = Field(default=1500, gt=0)
     ai_generations_per_host_per_day: int = Field(default=5, gt=0)

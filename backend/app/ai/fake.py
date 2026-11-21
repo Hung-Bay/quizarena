@@ -38,6 +38,18 @@ class GeminiRateLimitError(Exception):
         self.retry_delay = retry_delay
 
 
+class GeminiServerError(Exception):
+    """Mô phỏng lỗi HTTP 500/502/503/504 Service Unavailable do máy chủ Google quá tải."""
+
+    def __init__(
+        self,
+        message: str = "This model is currently experiencing high demand",
+        retry_delay: float = 3.0,
+    ) -> None:
+        super().__init__(message)
+        self.retry_delay = retry_delay
+
+
 class GeminiGatewayError(Exception):
     """Lỗi chung từ Gateway."""
 
