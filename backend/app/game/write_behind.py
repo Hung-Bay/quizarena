@@ -64,16 +64,6 @@ async def flush_answers_to_db(
             # Ánh xạ pid_str sang player_id nếu nó là user_id
             if pid_str not in user_to_player_cache:
                 mapped_pid = await redis.hget(f"game:{gid_str}:user_to_player", pid_str)  # type: ignore[misc]
-                if not mapped_pid:
-                    try:
-                        u_uuid = uuid.UUID(pid_str)
-                        stmt_u = select(GamePlayer.id).where(
-                            GamePlayer.session_id == gid_uuid, GamePlayer.user_id == u_uuid
-                        )
-                        found_id = (await session.execute(stmt_u)).scalar_one_or_none()
-                        mapped_pid = str(found_id) if found_id else None
-                    except ValueError:
-                        mapped_pid = None
                 user_to_player_cache[pid_str] = mapped_pid if mapped_pid else pid_str
 
             resolved_pid = user_to_player_cache[pid_str]
@@ -168,21 +158,8 @@ async def finalize_game_session(
     # 5. Cập nhật final_score và final_rank cho từng người chơi vào PostgreSQL
     for rank_idx, (pid_str, score_val) in enumerate(all_players, start=1):
         # Kiểm tra nếu pid_str là user_id thay vì player_id
-        resolved_pid = pid_str
         mapped_pid = await redis.hget(f"game:{gid_str}:user_to_player", pid_str)  # type: ignore[misc]
-        if mapped_pid:
-            resolved_pid = mapped_pid
-        else:
-            try:
-                u_uuid = uuid.UUID(pid_str)
-                stmt_u = select(GamePlayer.id).where(
-                    GamePlayer.session_id == gid_uuid, GamePlayer.user_id == u_uuid
-                )
-                found_id = (await session.execute(stmt_u)).scalar_one_or_none()
-                if found_id:
-                    resolved_pid = str(found_id)
-            except ValueError:
-                pass
+        resolved_pid = mapped_pid if mapped_pid else pid_str
 
         pid_uuid = uuid.UUID(resolved_pid)
         nick = (

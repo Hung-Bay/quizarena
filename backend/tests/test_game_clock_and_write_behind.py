@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -35,7 +36,7 @@ from app.game.enums import WSMessageType
 from app.realtime.connection_manager import ClientConnection, ConnectionManager
 from app.worker import close_question_task, flush_game_answers_task
 
-REDIS_TEST_URL = "redis://localhost:6379/0"
+REDIS_TEST_URL = os.getenv("REDIS_TEST_URL", "redis://localhost:6379/0")
 
 
 @pytest_asyncio.fixture

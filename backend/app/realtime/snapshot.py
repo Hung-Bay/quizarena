@@ -145,7 +145,6 @@ async def build_game_snapshot(
             "added_score": 0,
             "streak": player_streak,
             "rank": player_rank or 1,
-            "is_correct": False,
         }
         if not is_host
         else None,
