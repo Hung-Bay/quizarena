@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LogOut, PlusCircle, Play, Shield, User, Sparkles } from 'lucide-react';
+import { LogOut, PlusCircle, Play, Shield, User, Sparkles, Gamepad2 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
   const { user, logout } = useAuth();
@@ -17,19 +17,23 @@ export const DashboardPage: React.FC = () => {
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <Link to="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
             <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
               Q
             </div>
-            <div>
-              <span className="font-extrabold text-lg text-white tracking-tight">QuizArena</span>
-              <span className="hidden sm:inline-block ml-2 px-2 py-0.5 text-xs rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                Phase 4
-              </span>
-            </div>
-          </div>
+            <span className="font-extrabold text-lg text-white tracking-tight">QuizArena</span>
+          </Link>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <Link
+              to="/join"
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition"
+              title="Tham gia trận đấu bằng mã PIN"
+            >
+              <Gamepad2 className="w-3.5 h-3.5 text-amber-400" />
+              <span>Vào phòng đấu</span>
+            </Link>
+
             <div className="hidden sm:flex items-center gap-2 text-sm text-slate-400 bg-slate-800/60 px-3 py-1.5 rounded-xl border border-slate-700/60">
               <User className="w-4 h-4 text-indigo-400" />
               <span className="font-medium text-slate-200">{user?.display_name || user?.email}</span>
@@ -69,7 +73,23 @@ export const DashboardPage: React.FC = () => {
         </div>
 
         {/* Action cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-amber-500/50 transition-all group">
+            <div className="w-12 h-12 rounded-xl bg-amber-600/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mb-4 group-hover:scale-105 transition-transform">
+              <Gamepad2 className="w-6 h-6" />
+            </div>
+            <h2 className="text-lg font-bold text-white mb-2">Tham Gia Trận Đấu</h2>
+            <p className="text-slate-400 text-sm mb-4">
+              Nhập mã PIN 6 số hoặc quét mã QR để tham gia phòng thi đấu của Host.
+            </p>
+            <Link
+              to="/join"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-amber-400 hover:text-amber-300"
+            >
+              Nhập PIN tham gia &rarr;
+            </Link>
+          </div>
+
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 hover:border-indigo-500/50 transition-all group">
             <div className="w-12 h-12 rounded-xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-4 group-hover:scale-105 transition-transform">
               <PlusCircle className="w-6 h-6" />

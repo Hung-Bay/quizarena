@@ -10,14 +10,14 @@ import { z } from "zod";
 export const WsOptionSchema = z.object({
   id: z.string(),
   content: z.string(),
-  position: z.number().optional(),
+  position: z.number().nullish(),
 });
 export type WsOption = z.infer<typeof WsOptionSchema>;
 
 // --- 1. lobby.update ---
 export const LobbyUpdateDataSchema = z.object({
-  game_id: z.string().optional(),
-  pin: z.string().optional(),
+  game_id: z.string().nullish(),
+  pin: z.string().nullish(),
   player_count: z.number(),
   players: z
     .array(
@@ -26,14 +26,15 @@ export const LobbyUpdateDataSchema = z.object({
         nickname: z.string(),
       })
     )
-    .optional(),
+    .nullish(),
   new_player: z
     .object({
-      id: z.string(),
+      id: z.string().optional(),
+      player_id: z.string().optional(),
       nickname: z.string(),
     })
-    .optional(),
-  kicked_player_id: z.string().optional(),
+    .nullish(),
+  kicked_player_id: z.string().nullish(),
 });
 export type LobbyUpdateData = z.infer<typeof LobbyUpdateDataSchema>;
 
@@ -50,9 +51,9 @@ export const QuestionStartDataSchema = z.object({
   total_questions: z.number(),
   question_id: z.string(),
   content: z.string(),
-  type: z.string(),
-  points: z.number(),
-  time_limit_s: z.number(),
+  type: z.string().nullish(),
+  points: z.number().nullish(),
+  time_limit_s: z.number().nullish(),
   server_time: z.number(),
   deadline: z.number(),
   options: z.array(WsOptionSchema),
@@ -63,17 +64,17 @@ export type QuestionStartData = z.infer<typeof QuestionStartDataSchema>;
 export const AnswerAckDataSchema = z.object({
   accepted: z.boolean(),
   q_index: z.number(),
-  reason: z.string().optional(),
+  reason: z.string().nullish(),
 });
 export type AnswerAckData = z.infer<typeof AnswerAckDataSchema>;
 
 // --- 5. question.result ---
 export const PersonalResultSchema = z.object({
-  score: z.number(),
-  added_score: z.number(),
-  streak: z.number(),
-  rank: z.number(),
-  is_correct: z.boolean(),
+  score: z.number().nullish(),
+  added_score: z.number().nullish(),
+  streak: z.number().nullish(),
+  rank: z.number().nullish(),
+  is_correct: z.boolean().nullish(),
 });
 export type PersonalResult = z.infer<typeof PersonalResultSchema>;
 
@@ -86,32 +87,37 @@ export type PodiumEntry = z.infer<typeof PodiumEntrySchema>;
 
 export const QuestionResultDataSchema = z.object({
   q_index: z.number(),
-  correct_option_ids: z.array(z.string()),
-  distribution: z.record(z.string(), z.number()),
-  explanation: z.string().optional(),
-  podium: z.array(PodiumEntrySchema).optional(),
-  personal: PersonalResultSchema.optional(),
+  correct_option_ids: z.array(z.string()).nullish().default([]),
+  distribution: z.record(z.string(), z.number()).nullish().default({}),
+  explanation: z.string().nullish(),
+  podium: z.array(PodiumEntrySchema).nullish(),
+  leaderboard: z.array(z.any()).nullish(),
+  personal: PersonalResultSchema.nullish(),
+  player_points_awarded: z.number().nullish(),
+  player_total_score: z.number().nullish(),
+  player_rank: z.number().nullish(),
+  player_streak: z.number().nullish(),
 });
 export type QuestionResultData = z.infer<typeof QuestionResultDataSchema>;
 
 // --- 6. game.finished ---
 export const GameFinishedDataSchema = z.object({
-  game_id: z.string().optional(),
-  podium: z.array(PodiumEntrySchema),
-  total_players: z.number(),
+  game_id: z.string().nullish(),
+  podium: z.array(PodiumEntrySchema).nullish().default([]),
+  total_players: z.number().nullish().default(0),
   personal: z
     .object({
-      score: z.number(),
-      rank: z.number(),
+      score: z.number().nullish(),
+      rank: z.number().nullish(),
     })
-    .optional(),
+    .nullish(),
 });
 export type GameFinishedData = z.infer<typeof GameFinishedDataSchema>;
 
 // --- 7. player.kicked ---
 export const PlayerKickedDataSchema = z.object({
   player_id: z.string(),
-  reason: z.string().optional(),
+  reason: z.string().nullish(),
 });
 export type PlayerKickedData = z.infer<typeof PlayerKickedDataSchema>;
 
@@ -128,25 +134,28 @@ export const SnapshotDataSchema = z.object({
   q_index: z.number().default(0),
   total_questions: z.number().default(0),
   is_host: z.boolean().default(false),
-  pin: z.string().optional(),
-  player_count: z.number().optional(),
+  pin: z.string().nullish(),
+  player_count: z.number().nullish(),
   players: z
     .array(
       z.object({
         id: z.string(),
         nickname: z.string(),
-        score: z.number().optional(),
+        score: z.number().nullish(),
       })
     )
-    .optional(),
-  current_question: QuestionStartDataSchema.optional(),
-  player_score: z.number().optional(),
-  player_streak: z.number().optional(),
-  player_rank: z.number().optional(),
-  answers_distribution: z.record(z.string(), z.number()).optional(),
-  correct_option_ids: z.array(z.string()).optional(),
-  explanation: z.string().optional(),
-  podium: z.array(PodiumEntrySchema).optional(),
+    .nullish(),
+  has_answered: z.boolean().nullish(),
+  current_question: QuestionStartDataSchema.nullish(),
+  current_result: z.any().nullish(),
+  player_score: z.number().nullish(),
+  player_streak: z.number().nullish(),
+  player_rank: z.number().nullish(),
+  answers_distribution: z.record(z.string(), z.number()).nullish(),
+  correct_option_ids: z.array(z.string()).nullish(),
+  explanation: z.string().nullish(),
+  podium: z.array(PodiumEntrySchema).nullish(),
+  personal: PersonalResultSchema.nullish(),
 });
 export type SnapshotData = z.infer<typeof SnapshotDataSchema>;
 
@@ -225,6 +234,8 @@ export function buildAnswerSubmit(
     data: {
       q_index: qIndex,
       option_id: optionId,
+      option_ids: [optionId],
+      selected_option_ids: [optionId],
       answer_time_ms: answerTimeMs,
     },
   };

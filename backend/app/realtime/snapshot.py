@@ -82,10 +82,11 @@ async def build_game_snapshot(
             except Exception as exc:  # noqa: BLE001
                 log.warning("Không thể parse quiz snapshot cho game %s: %s", game_id, exc)
 
-    # 4. Lấy điểm, streak, hạng cá nhân của người chơi
+    # 4. Lấy điểm, streak, hạng cá nhân của người chơi và trạng thái đã nộp câu này chưa
     player_score = 0
     player_streak = 0
     player_rank: int | None = None
+    has_answered = False
 
     if not is_host and client_id:
         try:
@@ -100,6 +101,10 @@ async def build_game_snapshot(
             rank_val = await redis.zrevrank(f"game:{game_id}:lb", client_id)
             if rank_val is not None:
                 player_rank = rank_val + 1
+
+            if q_index > 0:
+                is_ans = await redis.sismember(f"game:{game_id}:q:{q_index}:answered", client_id)
+                has_answered = bool(is_ans)
         except Exception as exc:  # noqa: BLE001
             log.debug("Lỗi khi đọc điểm cá nhân của %s: %s", client_id, exc)
 
@@ -113,7 +118,7 @@ async def build_game_snapshot(
                 p_dict = json.loads(p_json)
                 players_data.append(
                     {
-                        "id": p_dict.get("client_id", p_id),
+                        "id": p_dict.get("id", p_dict.get("client_id", p_id)),
                         "nickname": p_dict.get("nickname", "Ẩn danh"),
                     }
                 )
@@ -128,12 +133,22 @@ async def build_game_snapshot(
         pin=pin,
         player_count=len(players_data),
         players=players_data,
+        has_answered=has_answered,
         current_question=current_question,
         current_result=None,
         player_score=player_score,
         player_streak=player_streak,
         player_rank=player_rank,
         is_host=is_host,
+        personal={
+            "score": player_score,
+            "added_score": 0,
+            "streak": player_streak,
+            "rank": player_rank or 1,
+            "is_correct": False,
+        }
+        if not is_host
+        else None,
     )
 
     return {

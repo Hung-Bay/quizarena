@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiRequest } from '../services/apiClient';
 import { AiGenerateModal } from '../components/AiGenerateModal';
 import {
+  ArrowLeft,
   PlusCircle,
   Sparkles,
   Play,
@@ -88,15 +89,24 @@ export const QuizListPage: React.FC = () => {
       <header className="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link to="/dashboard" className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
-              Q
+            <Link
+              to="/"
+              className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition"
+              title="Quay lại Trang chủ"
+            >
+              <ArrowLeft className="w-5 h-5" />
             </Link>
-            <div>
-              <span className="font-extrabold text-lg text-white tracking-tight">Thư Viện Quiz</span>
-              <span className="hidden sm:inline-block ml-2 text-xs text-slate-400">
-                Quản lý & Soạn thảo
-              </span>
-            </div>
+            <Link to="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
+              <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-600/30">
+                Q
+              </div>
+              <div>
+                <span className="font-extrabold text-lg text-white tracking-tight">Thư Viện Quiz</span>
+                <span className="hidden sm:inline-block ml-2 text-xs text-slate-400">
+                  Quản lý & Soạn thảo
+                </span>
+              </div>
+            </Link>
           </div>
 
           <div className="flex items-center gap-3">

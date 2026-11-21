@@ -341,9 +341,19 @@ async def join_game(
 
     game_id = uuid.UUID(game_id_str)
 
-    # 2. Kiểm tra trạng thái trận
+    # 2. Kiểm tra trạng thái trận và vai trò Host
     state = await redis.hgetall(f"game:{game_id}:state")  # type: ignore[misc]
     status = state.get("status", GameStatus.LOBBY.value) if state else GameStatus.LOBBY.value
+    host_id = state.get("host_id") if state else None
+
+    # CHẶN HOST KHÔNG ĐƯỢC THAM GIA VÀO CHÍNH PHÒNG MÌNH ĐANG HOST
+    if current_user and host_id and str(current_user.id) == host_id:
+        raise AppError(
+            "Bạn là Host của trận đấu này nên không thể tham gia với tư cách người chơi",
+            code="HOST_CANNOT_JOIN_OWN_GAME",
+            status_code=400,
+        )
+
     nick_lower = clean_nickname.lower()
 
     # 3. Kiểm tra xem người này có bị Host kick trước đó không (chặn 10 phút, GM-2)
@@ -365,6 +375,8 @@ async def join_game(
         # Nếu chính user đã đăng nhập này tham gia lại -> Cho phép tái sử dụng (reconnect)
         if current_user and existing_info.get("user_id") == str(current_user.id):
             player_id = uuid.UUID(existing_info["id"])
+            await redis.hset(f"game:{game_id}:user_to_player", str(current_user.id), str(player_id))
+            await redis.hset(f"game:{game_id}:nicknames", str(current_user.id), clean_nickname)
             roles = await user_repository.get_roles(session, current_user.id)
             perms = await user_repository.get_permissions(session, current_user.id)
             if "game:play" not in perms:
@@ -434,17 +446,39 @@ async def join_game(
     # Lưu mapping player_id -> nickname
     pipe.hset(f"game:{game_id}:nicknames", str(player_id), clean_nickname)
     pipe.expire(f"game:{game_id}:nicknames", PIN_TTL_SECONDS)
+    if current_user:
+        # Lưu mapping user_id -> player_id và user_id -> nickname để WebSocket nhận đúng player_id
+        pipe.hset(f"game:{game_id}:user_to_player", str(current_user.id), str(player_id))
+        pipe.expire(f"game:{game_id}:user_to_player", PIN_TTL_SECONDS)
+        pipe.hset(f"game:{game_id}:nicknames", str(current_user.id), clean_nickname)
     await pipe.execute()
 
     # 9. Phát thông báo realtime lobby.update qua Redis Pub/Sub
+    raw_all_players = await redis.hgetall(players_key)  # type: ignore[misc]
+    all_players: list[dict[str, str]] = []
+    if raw_all_players:
+        for p_val in raw_all_players.values():
+            try:
+                p_obj = json.loads(p_val)
+                all_players.append(
+                    {
+                        "id": p_obj.get("id", ""),
+                        "nickname": p_obj.get("nickname", "Ẩn danh"),
+                    }
+                )
+            except Exception:
+                pass
+
     lobby_msg = {
         "type": WSMessageType.LOBBY_UPDATE.value,
         "v": 1,
         "data": {
             "game_id": str(game_id),
             "pin": pin,
-            "player_count": player_count + 1,
+            "player_count": len(all_players) if all_players else (player_count + 1),
+            "players": all_players,
             "new_player": {
+                "id": str(player_id),
                 "player_id": str(player_id),
                 "nickname": clean_nickname,
             },

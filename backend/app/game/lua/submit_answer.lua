@@ -165,6 +165,7 @@ redis.call('HSET', streak_key, player_id, tostring(new_streak))
 
 -- 8.2. Cập nhật điểm câu này vào hash phụ để phục vụ thông điệp cá nhân hóa (question.result)
 redis.call('HSET', pts_key, player_id, tostring(points_awarded))
+redis.call('HSET', pts_key .. ':correct', player_id, is_correct and '1' or '0')
 
 -- 8.3. Tăng điểm trên Bảng xếp hạng ZSET Leaderboard
 local new_total_score = redis.call('ZINCRBY', lb_key, points_awarded, player_id)

@@ -89,12 +89,15 @@ async def build_question_result_payload(
         except Exception:
             pass
 
+    podium = [{"rank": e.rank, "nickname": e.nickname, "score": e.score} for e in leaderboard[:3]]
+
     result_data = QuestionResultData(
         q_index=q_index,
         correct_option_ids=correct_option_ids,
         explanation=explanation,
         distribution=distribution,
         leaderboard=leaderboard,
+        podium=podium,
     )
 
     return result_data.model_dump(mode="json")

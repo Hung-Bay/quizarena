@@ -3,6 +3,8 @@ import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useGameSocket } from "../hooks/useGameSocket";
 import {
+  ArrowLeft,
+  Home,
   Users,
   Play,
   SkipForward,
@@ -80,6 +82,17 @@ export const HostGamePage: React.FC = () => {
       {/* 1. Header Host */}
       <header className="px-6 py-4 bg-slate-900/90 backdrop-blur border-b border-slate-800 flex items-center justify-between sticky top-0 z-20">
         <div className="flex items-center gap-6">
+          {state.status === "lobby" && (
+            <button
+              onClick={() => navigate('/quizzes')}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
+              title="Rời phòng và quay về Quản lý Quiz"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">Rời phòng</span>
+            </button>
+          )}
+
           <div className="flex items-center gap-3">
             <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" />
             <span className="text-xl font-black text-white tracking-wider">
@@ -286,10 +299,10 @@ export const HostGamePage: React.FC = () => {
               <div className="grid grid-cols-4 gap-4 sm:gap-8 h-64 items-end pb-4 border-b border-slate-800">
                 {state.currentQuestion.options.map((opt, idx) => {
                   const color = COLOR_CLASSES[idx % COLOR_CLASSES.length];
-                  const count = state.questionResult?.distribution[opt.id] ?? 0;
+                  const count = state.questionResult?.distribution?.[opt.id] ?? 0;
                   const total = Object.values(state.questionResult?.distribution ?? {}).reduce((a, b) => a + b, 0);
                   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-                  const isCorrect = state.questionResult?.correct_option_ids.includes(opt.id);
+                  const isCorrect = state.questionResult?.correct_option_ids?.includes(opt.id) ?? false;
 
                   return (
                     <div key={opt.id} className="flex flex-col items-center gap-2 h-full justify-end">
@@ -393,6 +406,13 @@ export const HostGamePage: React.FC = () => {
                 className="px-6 py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm cursor-pointer transition"
               >
                 Về Quản Lý Quiz
+              </button>
+              <button
+                onClick={() => navigate('/')}
+                className="px-6 py-3.5 rounded-2xl bg-slate-850 hover:bg-slate-750 text-slate-300 font-bold text-sm cursor-pointer border border-slate-800 transition flex items-center gap-2"
+              >
+                <Home className="w-4 h-4" />
+                <span>Về Trang Chủ</span>
               </button>
             </div>
           </div>

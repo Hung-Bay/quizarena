@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { z } from 'zod';
 import { apiRequest } from '../services/apiClient';
 import { tokenStore } from '../services/tokenStore';
-import { Gamepad2, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
+import { Gamepad2, ArrowRight, ArrowLeft, AlertCircle, Loader2 } from 'lucide-react';
 import type { components } from '../types/api';
 
 const joinSchema = z.object({
@@ -60,6 +60,7 @@ export const JoinPage: React.FC = () => {
         state: {
           playerId: response.player_id,
           nickname: response.nickname,
+          pin: pin.trim(),
         },
       });
     } catch (err: any) {
@@ -77,6 +78,23 @@ export const JoinPage: React.FC = () => {
         {/* Glow */}
         <div className="absolute -top-16 -right-16 w-36 h-36 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-16 -left-16 w-36 h-36 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex items-center justify-between mb-4">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors py-1 px-2 rounded-lg hover:bg-slate-800"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Về trang chủ</span>
+          </Link>
+          <Link
+            to="/"
+            className="flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white"
+          >
+            <span className="w-5 h-5 rounded bg-indigo-600 flex items-center justify-center text-[10px] text-white">Q</span>
+            <span>QuizArena</span>
+          </Link>
+        </div>
 
         <div className="flex flex-col items-center text-center mb-6">
           <div className="w-14 h-14 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-3 shadow-inner">

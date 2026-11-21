@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
+  ArrowLeft,
   Trophy,
   History,
   PlayCircle,
@@ -88,6 +89,12 @@ export const HistoryPage: React.FC = () => {
             >
               Tham gia bằng mã PIN
             </button>
+            <button
+              onClick={() => navigate('/')}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-400 hover:text-white text-sm font-semibold transition"
+            >
+              ← Về trang chủ
+            </button>
           </div>
         </div>
       </div>
@@ -100,13 +107,22 @@ export const HistoryPage: React.FC = () => {
       <header className="sticky top-0 z-30 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 lg:px-8 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
-              <History className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold">Lịch Sử Trận Đấu</h1>
-              <p className="text-xs text-slate-400">Theo dõi tiến độ học tập và các trận đấu đã hoàn tất</p>
-            </div>
+            <button
+              onClick={() => navigate('/')}
+              className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition"
+              title="Quay lại Trang chủ"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <Link to="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                <History className="w-5 h-5" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold">Lịch Sử Trận Đấu</h1>
+                <p className="text-xs text-slate-400">Theo dõi tiến độ học tập và các trận đấu đã hoàn tất</p>
+              </div>
+            </Link>
           </div>
 
           <div className="flex items-center gap-2">

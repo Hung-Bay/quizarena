@@ -1,5 +1,5 @@
 import React from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useGameSocket } from "../hooks/useGameSocket";
 import {
   Triangle,
@@ -43,8 +43,10 @@ const OPTION_STYLES = [
 export const PlayerGamePage: React.FC = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const initialPin = (location.state as { pin?: string } | null)?.pin;
 
-  const { state, playerSubmitAnswer } = useGameSocket(gameId || "");
+  const { state, playerSubmitAnswer } = useGameSocket(gameId || "", null, initialPin);
 
   // Bị kick khỏi phòng
   if (state.connectionStatus === "kicked") {
@@ -120,8 +122,18 @@ export const PlayerGamePage: React.FC = () => {
               Hãy chú ý màn hình máy chiếu của Host. Trận đấu sắp bắt đầu!
             </p>
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              <span>Đang kết nối WebSocket trực tiếp</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  state.connectionStatus === "connected"
+                    ? "bg-emerald-500"
+                    : "bg-amber-400 animate-ping"
+                }`}
+              />
+              <span>
+                {state.connectionStatus === "connected"
+                  ? "Đã kết nối phòng đấu trực tiếp"
+                  : "Đang kết nối WebSocket..."}
+              </span>
             </div>
           </div>
         )}
@@ -268,7 +280,13 @@ export const PlayerGamePage: React.FC = () => {
                 onClick={() => navigate("/join")}
                 className="w-full py-3.5 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-sm cursor-pointer transition"
               >
-                Chơi Trận Khác
+                Chơi Trận Khác (Nhập PIN)
+              </button>
+              <button
+                onClick={() => navigate("/")}
+                className="w-full py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white font-semibold text-xs cursor-pointer transition"
+              >
+                Về Trang Chủ
               </button>
             </div>
           </div>

@@ -1,7 +1,9 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "../services/apiClient";
 import {
+  ArrowLeft,
   ShieldAlert,
   Users,
   BookOpen,
@@ -155,25 +157,43 @@ export const AdminPage: React.FC = () => {
       <div className="max-w-7xl mx-auto space-y-8">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-6">
-          <div>
-            <div className="flex items-center gap-3">
-              <span className="p-2.5 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-400">
-                <ShieldAlert className="w-6 h-6" />
-              </span>
-              <h1 className="text-3xl font-black text-white">Quản Trị Hệ Thống</h1>
+          <div className="flex items-center gap-4">
+            <Link
+              to="/"
+              className="p-2.5 rounded-2xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-colors"
+              title="Quay lại Trang chủ"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-400">
+                  <ShieldAlert className="w-6 h-6" />
+                </span>
+                <h1 className="text-3xl font-black text-white">Quản Trị Hệ Thống</h1>
+              </div>
+              <p className="text-slate-400 text-sm mt-1">
+                Trung tâm điều hành và kiểm soát QuizArena (FR-ADM-01..05)
+              </p>
             </div>
-            <p className="text-slate-400 text-sm mt-1">
-              Trung tâm điều hành và kiểm soát QuizArena (FR-ADM-01..05)
-            </p>
           </div>
 
-          <button
-            onClick={() => refetchMetrics()}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 text-sm font-semibold transition-colors cursor-pointer self-start sm:self-auto"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Làm mới số liệu
-          </button>
+          <div className="flex items-center gap-3 self-start sm:self-auto">
+            <Link
+              to="/"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 text-sm font-semibold transition-colors cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Về Trang Chủ</span>
+            </Link>
+            <button
+              onClick={() => refetchMetrics()}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Làm mới số liệu
+            </button>
+          </div>
         </div>
 
         {/* Navigation Tabs */}

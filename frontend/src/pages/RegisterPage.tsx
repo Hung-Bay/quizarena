@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { useAuth } from '../context/AuthContext';
-import { UserPlus, Sparkles, AlertCircle, Loader2 } from 'lucide-react';
+import { UserPlus, Sparkles, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 
 const registerSchema = z.object({
   email: z.string().email('Email không đúng định dạng'),
@@ -55,6 +55,19 @@ export const RegisterPage: React.FC = () => {
         {/* Glow decoration */}
         <div className="absolute -top-20 -right-20 w-44 h-44 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-20 -left-20 w-44 h-44 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex items-center justify-between mb-4">
+          <Link
+            to="/join"
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors py-1 px-2.5 rounded-lg hover:bg-slate-800"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Tham gia thi đấu (PIN)</span>
+          </Link>
+          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-xs text-white shadow-md shadow-indigo-600/30">
+            Q
+          </div>
+        </div>
 
         <div className="flex items-center gap-2 mb-2 text-indigo-400 font-bold tracking-wider text-sm uppercase">
           <Sparkles className="w-4 h-4" />

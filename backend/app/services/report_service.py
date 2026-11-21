@@ -16,7 +16,7 @@ import uuid
 from typing import Any
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.gateway_interface import GeminiGatewayProtocol
@@ -331,25 +331,51 @@ async def get_player_personal_feedback(
 
     # Đánh giá tổng quát cá nhân
     if accuracy >= 0.8:
+        performance_level = "excellent"
         eval_message = "Xuất sắc! Bạn đã nắm rất vững hầu hết các nội dung trọng tâm của bài thi."
     elif accuracy >= 0.5:
+        performance_level = "good"
         eval_message = (
             "Khá tốt! Bạn đã đạt yêu cầu cơ bản nhưng cần lưu ý thêm một số chủ đề hay nhầm lẫn."
         )
     else:
+        performance_level = "needs_improvement"
         eval_message = "Cần cố gắng thêm! Hãy xem lại các chủ đề trả lời chưa chính xác bên dưới."
+
+    stmt_count = select(func.count(GamePlayer.id)).where(GamePlayer.session_id == session_id)
+    total_participants = (await session.execute(stmt_count)).scalar() or 1
+
+    total_questions = len(questions_list) if len(questions_list) > 0 else total_ans
+    correct_answers = correct_ans
+
+    advice_list: list[str] = []
+    if report.advice_for_learner:
+        lines = [
+            line.strip().lstrip("-•*").strip()
+            for line in report.advice_for_learner.split("\n")
+            if line.strip()
+        ]
+        advice_list = lines if lines else [report.advice_for_learner]
 
     return {
         "player_id": str(player.id),
         "nickname": player.nickname,
         "final_score": player.final_score,
-        "final_rank": player.final_rank,
+        "final_rank": player.final_rank or 1,
+        "total_participants": total_participants,
+        "correct_answers": correct_answers,
+        "correct_answers_count": correct_answers,
+        "total_questions": total_questions,
         "accuracy_rate": accuracy,
+        "performance_level": performance_level,
         "average_response_ms": avg_speed,
         "evaluation": eval_message,
+        "encouragement": eval_message,
+        "weak_topics": sorted(list(wrong_topics)),
         "wrong_topics": sorted(list(wrong_topics)),
         "wrong_questions_count": len(wrong_questions),
         "wrong_questions": wrong_questions,
+        "advice_list": advice_list,
         "learning_advice": report.advice_for_learner,
         "ai_call_count": 0,  # Chứng minh 0 lần gọi AI
     }

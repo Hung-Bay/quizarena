@@ -51,12 +51,32 @@ async def flush_answers_to_db(
         return 0
 
     values_to_insert: list[dict[str, Any]] = []
+    # Cache mapping user_id -> player_id cho trận này
+    user_to_player_cache: dict[str, str] = {}
+
     for _msg_id, fields in stream_entries:
         try:
             pid_str = fields.get("player_id")
             qid_str = fields.get("question_id")
             if not pid_str or not qid_str:
                 continue
+
+            # Ánh xạ pid_str sang player_id nếu nó là user_id
+            if pid_str not in user_to_player_cache:
+                mapped_pid = await redis.hget(f"game:{gid_str}:user_to_player", pid_str)
+                if not mapped_pid:
+                    try:
+                        u_uuid = uuid.UUID(pid_str)
+                        stmt_u = select(GamePlayer.id).where(
+                            GamePlayer.session_id == gid_uuid, GamePlayer.user_id == u_uuid
+                        )
+                        found_id = (await session.execute(stmt_u)).scalar_one_or_none()
+                        mapped_pid = str(found_id) if found_id else None
+                    except ValueError:
+                        mapped_pid = None
+                user_to_player_cache[pid_str] = mapped_pid if mapped_pid else pid_str
+
+            resolved_pid = user_to_player_cache[pid_str]
 
             opt_ids_csv = fields.get("option_ids", "")
             option_ids = [opt.strip() for opt in opt_ids_csv.split(",") if opt.strip()]
@@ -70,7 +90,7 @@ async def flush_answers_to_db(
             values_to_insert.append(
                 {
                     "session_id": gid_uuid,
-                    "player_id": uuid.UUID(pid_str),
+                    "player_id": uuid.UUID(resolved_pid),
                     "question_id": uuid.UUID(qid_str),
                     "option_ids": option_ids,
                     "is_correct": fields.get("is_correct") == "1",
@@ -147,13 +167,38 @@ async def finalize_game_session(
 
     # 5. Cập nhật final_score và final_rank cho từng người chơi vào PostgreSQL
     for rank_idx, (pid_str, score_val) in enumerate(all_players, start=1):
-        pid_uuid = uuid.UUID(pid_str)
+        # Kiểm tra nếu pid_str là user_id thay vì player_id
+        resolved_pid = pid_str
+        mapped_pid = await redis.hget(f"game:{gid_str}:user_to_player", pid_str)
+        if mapped_pid:
+            resolved_pid = mapped_pid
+        else:
+            try:
+                u_uuid = uuid.UUID(pid_str)
+                stmt_u = select(GamePlayer.id).where(
+                    GamePlayer.session_id == gid_uuid, GamePlayer.user_id == u_uuid
+                )
+                found_id = (await session.execute(stmt_u)).scalar_one_or_none()
+                if found_id:
+                    resolved_pid = str(found_id)
+            except ValueError:
+                pass
+
+        pid_uuid = uuid.UUID(resolved_pid)
         nick = (
-            await redis.hget(f"game:{gid_str}:nicknames", pid_str)  # type: ignore[misc]
-            or "Người chơi"
+            await redis.hget(f"game:{gid_str}:nicknames", resolved_pid)  # type: ignore[misc]
+            or await redis.hget(f"game:{gid_str}:nicknames", pid_str)
+            or None
         )
+        if not nick:
+            stmt_nick = select(GamePlayer.nickname).where(
+                GamePlayer.session_id == gid_uuid, GamePlayer.id == pid_uuid
+            )
+            nick = (await session.execute(stmt_nick)).scalar_one_or_none() or "Người chơi"
+
         streak_val = (
-            await redis.hget(f"game:{gid_str}:streaks", pid_str)  # type: ignore[misc]
+            await redis.hget(f"game:{gid_str}:streaks", resolved_pid)  # type: ignore[misc]
+            or await redis.hget(f"game:{gid_str}:streaks", pid_str)
             or 0
         )
 

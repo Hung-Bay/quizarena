@@ -120,6 +120,23 @@ function gameReducer(state: GameState, action: Action): GameState {
 
     case "APPLY_SNAPSHOT": {
       const snap = action.payload;
+      const isNewQuestion = snap.q_index !== state.qIndex;
+      const hasAnswered = snap.has_answered;
+
+      let nextIsSubmitted = state.isAnswerSubmitted;
+      let nextSelectedOptionId = state.selectedOptionId;
+
+      if (isNewQuestion) {
+        nextIsSubmitted = hasAnswered ?? false;
+        nextSelectedOptionId = null;
+      } else if (hasAnswered !== undefined && hasAnswered !== null) {
+        nextIsSubmitted = hasAnswered;
+        if (!hasAnswered) {
+          nextSelectedOptionId = null;
+        }
+      }
+
+      const personal = snap.personal;
       return {
         ...state,
         status: snap.status,
@@ -130,10 +147,13 @@ function gameReducer(state: GameState, action: Action): GameState {
         playerCount: snap.player_count ?? (snap.players?.length || state.playerCount),
         players: snap.players ?? state.players,
         currentQuestion: snap.current_question ?? state.currentQuestion,
-        personalScore: snap.player_score ?? state.personalScore,
-        personalStreak: snap.player_streak ?? state.personalStreak,
-        personalRank: snap.player_rank ?? state.personalRank,
-        podium: snap.podium ?? state.podium,
+        selectedOptionId: nextSelectedOptionId,
+        isAnswerSubmitted: nextIsSubmitted,
+        isAnswerAccepted: isNewQuestion ? null : state.isAnswerAccepted,
+        personalScore: snap.player_score ?? personal?.score ?? state.personalScore,
+        personalStreak: snap.player_streak ?? personal?.streak ?? state.personalStreak,
+        personalRank: snap.player_rank ?? personal?.rank ?? state.personalRank,
+        podium: snap.podium || state.podium,
         questionResult:
           snap.status === "question_result"
             ? {
@@ -142,8 +162,9 @@ function gameReducer(state: GameState, action: Action): GameState {
                 distribution: snap.answers_distribution ?? {},
                 explanation: snap.explanation,
                 podium: snap.podium,
+                personal: personal,
               }
-            : state.questionResult,
+            : (isNewQuestion ? null : state.questionResult),
       };
     }
 
@@ -195,23 +216,42 @@ function gameReducer(state: GameState, action: Action): GameState {
         progressRatio: action.payload.progressRatio,
       };
 
-    case "QUESTION_RESULT":
+    case "QUESTION_RESULT": {
+      const p = action.payload.personal;
+      const score = p?.score ?? action.payload.player_total_score ?? state.personalScore;
+      const streak = p?.streak ?? action.payload.player_streak ?? state.personalStreak;
+      const rank = p?.rank ?? action.payload.player_rank ?? state.personalRank;
+      const addedScore = p?.added_score ?? action.payload.player_points_awarded ?? 0;
+      const isCorrect = p?.is_correct ?? (addedScore > 0);
+
+      const normalizedResult: QuestionResultData = {
+        ...action.payload,
+        personal: {
+          score,
+          added_score: addedScore,
+          streak,
+          rank: rank ?? 1,
+          is_correct: isCorrect,
+        },
+      };
+
       return {
         ...state,
         status: "question_result",
-        questionResult: action.payload,
-        personalScore: action.payload.personal?.score ?? state.personalScore,
-        personalStreak: action.payload.personal?.streak ?? state.personalStreak,
-        personalRank: action.payload.personal?.rank ?? state.personalRank,
-        podium: action.payload.podium ?? state.podium,
+        questionResult: normalizedResult,
+        personalScore: score,
+        personalStreak: streak,
+        personalRank: rank,
+        podium: action.payload.podium || state.podium,
       };
+    }
 
     case "GAME_FINISHED":
       return {
         ...state,
         status: "finished",
         gameFinished: action.payload,
-        podium: action.payload.podium,
+        podium: action.payload.podium || state.podium,
         personalScore: action.payload.personal?.score ?? state.personalScore,
         personalRank: action.payload.personal?.rank ?? state.personalRank,
       };
@@ -375,6 +415,13 @@ export function useGameSocket(
             // Buffer updates để batch render 250ms
             if (env.data.players) {
               lobbyBufferRef.current = env.data.players;
+            } else if (env.data.new_player) {
+              const np = env.data.new_player;
+              const newId = np.id || np.player_id || "";
+              const currentList = lobbyBufferRef.current ?? state.players;
+              if (!currentList.some((p) => p.id === newId)) {
+                lobbyBufferRef.current = [...currentList, { id: newId, nickname: np.nickname }];
+              }
             }
             if (!lobbyBatchTimerRef.current) {
               lobbyBatchTimerRef.current = window.setTimeout(() => {
@@ -559,10 +606,10 @@ export function useGameSocket(
   const playerSubmitAnswer = useCallback(
     (optionId: string) => {
       if (state.isAnswerSubmitted || !state.currentQuestion) return;
+      const timeLimitMs = (state.currentQuestion.time_limit_s || 15) * 1000;
       const answerTimeMs = countdownRef.current
         ? Math.round(
-            (state.currentQuestion.time_limit_s * 1000) -
-              countdownRef.current.getRemainingMs()
+            timeLimitMs - countdownRef.current.getRemainingMs()
           )
         : 1000;
 

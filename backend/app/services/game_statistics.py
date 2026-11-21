@@ -82,6 +82,9 @@ async def aggregate_game_statistics(
 
     correct_answers_count = sum(1 for a in answers if a.is_correct)
     overall_accuracy = round(correct_answers_count / total_answers, 4) if total_answers > 0 else 0.0
+    average_score = (
+        round(sum(p.final_score for p in players) / total_players, 1) if total_players > 0 else 0.0
+    )
     avg_response_ms = (
         round(sum(a.response_ms for a in answers) / total_answers, 2) if total_answers > 0 else 0.0
     )
@@ -115,11 +118,14 @@ async def aggregate_game_statistics(
             {
                 "question_id": qid_str,
                 "q_index": idx,
+                "question_index": idx - 1,
                 "content": q.get("content", ""),
+                "question_text": q.get("content", ""),
                 "topic": q.get("topic") or "Chung",
                 "total_answers": q_total,
                 "correct_answers": q_correct,
                 "accuracy_rate": q_accuracy,
+                "correct_percentage": q_accuracy,
                 "average_response_ms": q_avg_ms,
                 "option_distribution": option_dist,
             }
@@ -139,10 +145,12 @@ async def aggregate_game_statistics(
         t_total = data["total_answers"]
         t_correct = data["correct_answers"]
         t_acc = round(t_correct / t_total, 4) if t_total > 0 else 0.0
+        q_count = len([q for q in questions_list if (q.get("topic") or "Chung") == topic_name])
         topic_stats_list.append(
             {
                 "topic": topic_name,
                 "total_answers": t_total,
+                "total_questions": q_count,
                 "correct_answers": t_correct,
                 "accuracy_rate": t_acc,
                 "mastery_level": calculate_mastery(t_acc),
@@ -188,6 +196,8 @@ async def aggregate_game_statistics(
         "total_questions": total_questions,
         "total_answers": total_answers,
         "overall_accuracy": overall_accuracy,
+        "overall_accuracy_rate": overall_accuracy,
+        "average_score": average_score,
         "average_response_ms": avg_response_ms,
         "question_stats": question_stats_list,
         "topic_stats": topic_stats_list,
