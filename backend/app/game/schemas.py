@@ -130,6 +130,10 @@ class GameSnapshotData(BaseModel):
     player_rank: int | None = None
     is_host: bool = False
     personal: dict[str, Any] | None = None
+    answers_distribution: dict[str, int] | None = None
+    correct_option_ids: list[uuid.UUID] | None = None
+    explanation: str | None = None
+    podium: list[dict[str, Any]] | None = None
 
 
 # =========================================================================

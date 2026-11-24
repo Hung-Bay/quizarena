@@ -42,6 +42,24 @@ class GameDetailResponse(BaseModel):
     ended_at: datetime | None = None
 
 
+class GamePlayerResultResponse(BaseModel):
+    player_id: uuid.UUID
+    nickname: str
+    final_score: int
+    final_rank: int
+    streak: int
+    correct_count: int
+    total_answered: int
+
+
+class GameResultsResponse(BaseModel):
+    game_id: uuid.UUID
+    quiz_title: str
+    status: str
+    total_players: int
+    players: list[GamePlayerResultResponse]
+
+
 class JoinGameRequest(BaseModel):
     pin: str = Field(min_length=6, max_length=6, description="Mã PIN 6 ký tự số của trận đấu")
     nickname: str = Field(

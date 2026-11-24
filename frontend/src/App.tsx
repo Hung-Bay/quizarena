@@ -78,8 +78,22 @@ export const App: React.FC = () => {
             <Route path="/games/:gameId/report" element={<GameReportPage />} />
 
             {/* Match History */}
-            <Route path="/history" element={<HistoryPage />} />
-            <Route path="/me/games" element={<HistoryPage />} />
+            <Route
+              path="/history"
+              element={
+                <ProtectedRoute>
+                  <HistoryPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/me/games"
+              element={
+                <ProtectedRoute>
+                  <HistoryPage />
+                </ProtectedRoute>
+              }
+            />
 
             <Route
               path="/host/:gameId"
