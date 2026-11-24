@@ -158,13 +158,31 @@ function gameReducer(state: GameState, action: Action): GameState {
           snap.status === "question_result"
             ? {
                 q_index: snap.q_index,
-                correct_option_ids: snap.correct_option_ids ?? [],
-                distribution: snap.answers_distribution ?? {},
-                explanation: snap.explanation,
-                podium: snap.podium,
-                personal: personal,
+                correct_option_ids:
+                  snap.correct_option_ids ??
+                  snap.current_result?.correct_option_ids ??
+                  (snap.q_index === state.questionResult?.q_index ? state.questionResult?.correct_option_ids : null) ??
+                  [],
+                distribution:
+                  snap.answers_distribution ??
+                  snap.current_result?.distribution ??
+                  (snap.q_index === state.questionResult?.q_index ? state.questionResult?.distribution : null) ??
+                  {},
+                explanation:
+                  snap.explanation ??
+                  snap.current_result?.explanation ??
+                  (snap.q_index === state.questionResult?.q_index ? state.questionResult?.explanation : null),
+                podium:
+                  snap.podium ??
+                  snap.current_result?.podium ??
+                  (snap.q_index === state.questionResult?.q_index ? state.questionResult?.podium : null),
+                personal:
+                  personal ??
+                  (snap.q_index === state.questionResult?.q_index ? state.questionResult?.personal : null),
               }
-            : (isNewQuestion ? null : state.questionResult),
+            : isNewQuestion
+            ? null
+            : state.questionResult,
       };
     }
 

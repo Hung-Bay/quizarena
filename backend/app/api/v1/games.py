@@ -23,7 +23,7 @@ from app.api.deps import (
 from app.core import security
 from app.core.rbac import PermissionCode
 from app.models.ai import AiJob
-from app.models.game import GamePlayer, GameSession
+from app.models.game import GamePlayer, GameSession, PlayerAnswer
 from app.models.report import GameReport
 from app.models.user import User
 from app.repositories import user_repository as users_repo
@@ -32,7 +32,9 @@ from app.schemas.games import (
     CreateGameResponse,
     GameDetailResponse,
     GameListItemResponse,
+    GamePlayerResultResponse,
     GameReportResponse,
+    GameResultsResponse,
     JoinGameRequest,
     JoinGameResponse,
     UserGameHistoryItemResponse,
@@ -120,6 +122,80 @@ async def get_game_detail(
     async with session.begin():
         detail = await game_service.get_game_detail(session, redis, game_id=id)
     return GameDetailResponse(**detail)
+
+
+@router.get("/{id}/results", response_model=GameResultsResponse)
+async def get_game_results(
+    id: uuid.UUID,
+    session: DbSession,
+) -> GameResultsResponse:
+    """Xem kết quả chi tiết trận đấu: danh sách người chơi, điểm số, chuỗi thắng (streak), và số câu đúng."""
+    stmt = (
+        select(GameSession)
+        .where(GameSession.id == id)
+        .options(
+            selectinload(GameSession.players),
+            selectinload(GameSession.answers),
+        )
+    )
+    game = (await session.execute(stmt)).scalar_one_or_none()
+    if not game:
+        raise HTTPException(status_code=404, detail="Trận đấu không tồn tại")
+
+    players = game.players or []
+    answers = game.answers or []
+
+    # Gom answers theo player_id để tính streak và số câu đúng
+    answers_by_player: dict[uuid.UUID, list[PlayerAnswer]] = {}
+    for a in answers:
+        answers_by_player.setdefault(a.player_id, []).append(a)
+
+    player_results: list[GamePlayerResultResponse] = []
+    for p in players:
+        p_answers = answers_by_player.get(p.id, [])
+        p_answers.sort(key=lambda a: a.id)
+
+        max_streak = 0
+        cur_streak = 0
+        correct_count = 0
+        for ans in p_answers:
+            if ans.is_correct:
+                correct_count += 1
+                cur_streak += 1
+                if cur_streak > max_streak:
+                    max_streak = cur_streak
+            else:
+                cur_streak = 0
+
+        player_results.append(
+            GamePlayerResultResponse(
+                player_id=p.id,
+                nickname=p.nickname,
+                final_score=p.final_score,
+                final_rank=p.final_rank or 0,
+                streak=max_streak,
+                correct_count=correct_count,
+                total_answered=len(p_answers),
+            )
+        )
+
+    # Đánh lại rank nếu final_rank chưa có hoặc bằng 0
+    player_results.sort(key=lambda r: (-r.final_score, -r.streak))
+    for idx, r in enumerate(player_results, start=1):
+        if not r.final_rank:
+            r.final_rank = idx
+
+    quiz_title = ""
+    if game.quiz_snapshot and isinstance(game.quiz_snapshot, dict):
+        quiz_title = game.quiz_snapshot.get("title", "")
+
+    return GameResultsResponse(
+        game_id=game.id,
+        quiz_title=quiz_title,
+        status=game.status,
+        total_players=len(players),
+        players=player_results,
+    )
 
 
 @router.get("/{id}/report", response_model=GameReportResponse)

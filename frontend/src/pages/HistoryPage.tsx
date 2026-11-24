@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   Trophy,
   History,
-  PlayCircle,
   BarChart3,
   Users,
   Calendar,
@@ -13,9 +12,11 @@ import {
   ShieldAlert,
   Loader2,
   Gamepad2,
+  Flame,
+  X,
 } from 'lucide-react'
 import { apiRequest } from '../services/apiClient'
-import { tokenStore } from '../services/tokenStore'
+import { useAuth } from '../context/AuthContext'
 
 interface PlayedGameItem {
   game_id: string
@@ -29,7 +30,7 @@ interface PlayedGameItem {
 interface HostedGameItem {
   game_id: string
   pin: string
-  status: 'LOBBY' | 'ACTIVE' | 'FINISHED' | 'CANCELLED'
+  status: 'LOBBY' | 'ACTIVE' | 'FINISHED' | 'CANCELLED' | string
   quiz_id: string
   quiz_title: string
   player_count: number
@@ -38,10 +39,28 @@ interface HostedGameItem {
   ended_at: string | null
 }
 
+interface GamePlayerResult {
+  player_id: string
+  nickname: string
+  final_score: number
+  final_rank: number
+  streak: number
+  correct_count: number
+  total_answered: number
+}
+
+interface GameResultsData {
+  game_id: string
+  quiz_title: string
+  status: string
+  total_players: number
+  players: GamePlayerResult[]
+}
+
 export const HistoryPage: React.FC = () => {
   const navigate = useNavigate()
+  const { isAuthenticated, isLoading: authLoading } = useAuth()
   const [activeTab, setActiveTab] = useState<'played' | 'hosted'>('played')
-  const isLoggedIn = !!tokenStore.getAccessToken()
 
   // Query các trận đã tham gia (Player)
   const {
@@ -51,7 +70,7 @@ export const HistoryPage: React.FC = () => {
   } = useQuery<PlayedGameItem[]>({
     queryKey: ['myPlayedGames'],
     queryFn: () => apiRequest<PlayedGameItem[]>('/api/v1/me/games'),
-    enabled: isLoggedIn,
+    enabled: isAuthenticated,
   })
 
   // Query các trận đã làm Host
@@ -62,10 +81,46 @@ export const HistoryPage: React.FC = () => {
   } = useQuery<HostedGameItem[]>({
     queryKey: ['myHostedGames'],
     queryFn: () => apiRequest<HostedGameItem[]>('/api/v1/games'),
-    enabled: isLoggedIn,
+    enabled: isAuthenticated,
   })
 
-  if (!isLoggedIn) {
+  // State và Query xem kết quả chi tiết trận đấu
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
+  const [sortCriteria, setSortCriteria] = useState<'score' | 'streak'>('score')
+
+  const {
+    data: gameResults,
+    isLoading: loadingResults,
+    error: errorResults,
+  } = useQuery<GameResultsData>({
+    queryKey: ['gameResults', selectedGameId],
+    queryFn: () => apiRequest<GameResultsData>(`/api/v1/games/${selectedGameId}/results`),
+    enabled: !!selectedGameId,
+  })
+
+  // Sắp xếp danh sách người chơi theo tiêu chí đã chọn
+  const sortedPlayers = React.useMemo(() => {
+    if (!gameResults?.players) return []
+    return [...gameResults.players].sort((a, b) => {
+      if (sortCriteria === 'streak') {
+        if (b.streak !== a.streak) return b.streak - a.streak
+        return b.final_score - a.final_score
+      }
+      if (b.final_score !== a.final_score) return b.final_score - a.final_score
+      return b.streak - a.streak
+    })
+  }, [gameResults?.players, sortCriteria])
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+        <span className="text-sm">Đang tải thông tin phiên...</span>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6">
         <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-4">
@@ -214,13 +269,22 @@ export const HistoryPage: React.FC = () => {
                           {game.ended_at ? new Date(game.ended_at).toLocaleDateString('vi-VN') : 'Đang diễn ra'}
                         </span>
                       </div>
-                      <button
-                        onClick={() => navigate(`/games/${game.game_id}/report`)}
-                        className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition"
-                      >
-                        <span>Xem nhận xét</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setSelectedGameId(game.game_id)}
+                          className="flex items-center gap-1 text-xs font-semibold text-amber-400 hover:text-amber-300 transition cursor-pointer"
+                        >
+                          <Trophy className="w-3.5 h-3.5" />
+                          <span>Xem kết quả</span>
+                        </button>
+                        <button
+                          onClick={() => navigate(`/games/${game.game_id}/report`)}
+                          className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition cursor-pointer"
+                        >
+                          <span>Nhận xét AI</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -291,23 +355,25 @@ export const HistoryPage: React.FC = () => {
                         <span>{new Date(game.created_at).toLocaleDateString('vi-VN')}</span>
                       </div>
 
-                      {game.status === 'FINISHED' ? (
+                      <div className="flex items-center gap-2">
                         <button
-                          onClick={() => navigate(`/games/${game.game_id}/report`)}
-                          className="flex items-center gap-1 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition"
+                          onClick={() => setSelectedGameId(game.game_id)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-xs font-semibold text-indigo-300 hover:text-white transition cursor-pointer"
                         >
-                          <BarChart3 className="w-3.5 h-3.5" />
-                          <span>Báo cáo lớp học</span>
+                          <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Xem kết quả trận đấu</span>
                         </button>
-                      ) : (
-                        <button
-                          onClick={() => navigate(`/host/${game.game_id}`)}
-                          className="flex items-center gap-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition"
-                        >
-                          <PlayCircle className="w-3.5 h-3.5" />
-                          <span>Vào phòng điều khiển</span>
-                        </button>
-                      )}
+                        {game.status.toLowerCase() === 'finished' && (
+                          <button
+                            onClick={() => navigate(`/games/${game.game_id}/report`)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition cursor-pointer"
+                            title="Xem báo cáo phân tích lớp học (AI)"
+                          >
+                            <BarChart3 className="w-3.5 h-3.5" />
+                            <span>Báo cáo</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -330,6 +396,177 @@ export const HistoryPage: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* MODAL XEM KẾT QUẢ TRẬN ĐẤU */}
+      {selectedGameId && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 sm:p-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="px-6 py-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <Trophy className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white leading-tight">
+                    Kết Quả Trận Đấu
+                  </h2>
+                  <p className="text-xs text-slate-400 line-clamp-1">
+                    {gameResults?.quiz_title || 'Đang tải thông tin...'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSelectedGameId(null)}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
+                title="Đóng"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Toolbar: Bộ lọc & Tiêu chí sắp xếp */}
+            <div className="px-6 py-3 bg-slate-950/60 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-400">Sắp xếp:</span>
+                <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                  <button
+                    onClick={() => setSortCriteria('score')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      sortCriteria === 'score'
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Trophy className="w-3.5 h-3.5" />
+                    <span>Điểm số giảm dần</span>
+                  </button>
+                  <button
+                    onClick={() => setSortCriteria('streak')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      sortCriteria === 'streak'
+                        ? 'bg-amber-600 text-white shadow'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Flame className="w-3.5 h-3.5 text-orange-300" />
+                    <span>Streak giảm dần</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-xs text-slate-400 font-semibold">
+                Tổng số: <span className="text-indigo-400 font-bold">{sortedPlayers.length}</span> người chơi
+              </div>
+            </div>
+
+            {/* Danh sách người chơi */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-2.5">
+              {loadingResults ? (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-400 mb-3" />
+                  <p className="text-sm">Đang tải bảng kết quả...</p>
+                </div>
+              ) : errorResults ? (
+                <div className="p-6 text-center text-red-300 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                  <ShieldAlert className="w-8 h-8 mx-auto mb-2 text-red-400" />
+                  <p className="text-sm font-semibold">Không thể tải kết quả trận đấu này.</p>
+                </div>
+              ) : sortedPlayers.length === 0 ? (
+                <div className="text-center py-16 text-slate-500">
+                  <Users className="w-12 h-12 mx-auto mb-3 text-slate-600" />
+                  <p className="text-sm">Không có dữ liệu người chơi trong trận đấu này.</p>
+                </div>
+              ) : (
+                sortedPlayers.map((player, idx) => (
+                  <div
+                    key={player.player_id}
+                    className={`flex items-center justify-between p-3.5 rounded-2xl border transition ${
+                      idx === 0
+                        ? 'bg-amber-500/10 border-amber-500/30'
+                        : idx === 1
+                        ? 'bg-slate-400/10 border-slate-400/30'
+                        : idx === 2
+                        ? 'bg-amber-700/10 border-amber-700/30'
+                        : 'bg-slate-800/60 border-slate-800'
+                    }`}
+                  >
+                    {/* Vị trí thứ hạng và tên */}
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0 ${
+                          idx === 0
+                            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
+                            : idx === 1
+                            ? 'bg-slate-300 text-slate-950 shadow-md shadow-slate-300/30'
+                            : idx === 2
+                            ? 'bg-amber-700 text-white shadow-md shadow-amber-700/30'
+                            : 'bg-slate-800 text-slate-400 border border-slate-700'
+                        }`}
+                      >
+                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="font-bold text-white text-sm truncate">{player.nickname}</p>
+                        <p className="text-xs text-slate-400">
+                          {player.total_answered > 0
+                            ? `Đúng ${player.correct_count}/${player.total_answered} câu`
+                            : 'Chưa có lượt trả lời'}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Điểm và Streak */}
+                    <div className="flex items-center gap-4 shrink-0">
+                      {/* Streak */}
+                      <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs font-bold">
+                        <Flame className="w-3.5 h-3.5 fill-orange-500" />
+                        <span>{player.streak} streak</span>
+                      </div>
+
+                      {/* Điểm số */}
+                      <div className="text-right min-w-[70px]">
+                        <span className="text-sm font-black text-emerald-400">
+                          {player.final_score.toLocaleString()}
+                        </span>
+                        <span className="text-[10px] text-slate-500 block font-semibold">pts</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
+              {gameResults?.status.toLowerCase() === 'finished' ? (
+                <button
+                  onClick={() => {
+                    const gid = selectedGameId
+                    setSelectedGameId(null)
+                    navigate(`/games/${gid}/report`)
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition cursor-pointer"
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  <span>Xem Báo Cáo Chi Tiết AI</span>
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <button
+                onClick={() => setSelectedGameId(null)}
+                className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

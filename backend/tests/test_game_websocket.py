@@ -620,6 +620,43 @@ async def test_ws_reconnect_during_active_question_receives_snapshot(redis_clien
             assert "is_correct" not in raw_snap
 
 
+@pytest.mark.asyncio
+async def test_ws_reconnect_during_question_result_receives_distribution(redis_client):
+    """Host/Player kết nối lại khi ở question_result nhận snapshot có phân bố câu trả lời và câu hỏi."""
+    gid = str(uuid.uuid4())
+    hid = str(uuid.uuid4())
+    pid = str(uuid.uuid4())
+    _ = await setup_test_game_session(redis_client, game_id=gid, host_id=hid, player_id=pid)
+
+    opt1_id = str(uuid.uuid4())
+    opt2_id = str(uuid.uuid4())
+
+    await redis_client.hset(
+        f"game:{gid}:state",
+        mapping={
+            "status": "question_result",
+            "q_index": "1",
+        },
+    )
+    # Giả lập phân bố đáp án và đáp án đúng
+    await redis_client.hset(f"game:{gid}:q:1:dist", mapping={opt1_id: "3", opt2_id: "1"})
+    await redis_client.sadd(f"game:{gid}:q:1:correct_keys", opt1_id)
+
+    ticket = await create_test_ticket(redis_client, game_id=gid, sub=hid, is_host=True)
+
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/game?ticket={ticket}") as ws:
+            snap = ws.receive_json()
+            assert snap["type"] == "snapshot"
+            data = snap["data"]
+            assert data["status"] == "question_result"
+            assert data["q_index"] == 1
+            assert data["answers_distribution"] == {opt1_id: 3, opt2_id: 1}
+            assert opt1_id in data["correct_option_ids"]
+            assert data["current_question"] is not None
+            assert data["current_question"]["content"] == "Thủ đô của Việt Nam là gì?"
+
+
 # =========================================================================
 # 9. TEST HOST GAME NEXT VÀ CHỐNG BẤM ĐÚP (GM-14)
 # =========================================================================

@@ -396,3 +396,30 @@ async def test_single_call_invariant_and_sql_proof(db_session: AsyncSession, fak
     assert len(res_reports) == 0, (
         "Vi phạm ràng buộc: Tồn tại nhiều hơn 1 game_report cho một session"
     )
+
+
+@pytest.mark.asyncio
+async def test_get_game_results_endpoint(db_session: AsyncSession):
+    """Test API lấy danh sách kết quả người chơi kèm streak và điểm số."""
+    from app.api.v1.games import get_game_results
+
+    game, p1, p2 = await _create_test_game_with_answers(db_session)
+
+    res = await get_game_results(id=game.id, session=db_session)
+    assert res.game_id == game.id
+    assert res.total_players == 2
+    assert len(res.players) == 2
+
+    p1_res = next(p for p in res.players if p.player_id == p1.id)
+    assert p1_res.nickname == "NguyenVanA_BiMat"
+    assert p1_res.streak == 2
+    assert p1_res.correct_count == 2
+    assert p1_res.final_rank == 1
+    assert p1_res.final_score == 1500
+
+    p2_res = next(p for p in res.players if p.player_id == p2.id)
+    assert p2_res.nickname == "TranThiB_Hacker"
+    assert p2_res.streak == 1
+    assert p2_res.correct_count == 1
+    assert p2_res.final_rank == 2
+    assert p2_res.final_score == 800
