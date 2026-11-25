@@ -360,7 +360,20 @@ class MessageHandler:
 
         # 4. Cập nhật và phát lobby.update cho những người còn lại
         players_raw = await self.redis.hgetall(f"game:{game_id}:players")  # type: ignore[misc]
-        player_count = len(players_raw)
+        all_players: list[dict[str, str]] = []
+        if players_raw:
+            for p_val in players_raw.values():
+                try:
+                    p_obj = json.loads(p_val)
+                    all_players.append(
+                        {
+                            "id": p_obj.get("id", ""),
+                            "nickname": p_obj.get("nickname", "Ẩn danh"),
+                        }
+                    )
+                except Exception:
+                    pass
+        player_count = len(all_players)
 
         update_envelope = {
             "type": WSMessageType.LOBBY_UPDATE.value,
@@ -368,6 +381,7 @@ class MessageHandler:
             "data": {
                 "game_id": game_id,
                 "player_count": player_count,
+                "players": all_players,
                 "kicked_player_id": target_pid_str,
             },
         }

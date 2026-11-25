@@ -423,3 +423,55 @@ async def test_get_game_results_endpoint(db_session: AsyncSession):
     assert p2_res.correct_count == 1
     assert p2_res.final_rank == 2
     assert p2_res.final_score == 800
+
+
+@pytest.mark.asyncio
+async def test_history_excludes_lobby_and_cancelled_games(db_session: AsyncSession):
+    """Lịch sử trận đấu (Host & Player) chỉ hiển thị trận đã hoàn thành (finished), bỏ qua lobby/cancelled."""
+    from app.api.v1.games import get_my_game_history, list_games
+
+    finished_game, p1, _ = await _create_test_game_with_answers(db_session)
+    host_id = finished_game.host_id
+    quiz_id = finished_game.quiz_id
+
+    lobby_game = GameSession(
+        id=uuid.uuid4(),
+        quiz_id=quiz_id,
+        host_id=host_id,
+        pin="111111",
+        status="lobby",
+        quiz_snapshot={"title": "Lobby Game", "total_questions": 1, "questions": []},
+    )
+    cancelled_game = GameSession(
+        id=uuid.uuid4(),
+        quiz_id=quiz_id,
+        host_id=host_id,
+        pin="222222",
+        status="cancelled",
+        quiz_snapshot={"title": "Cancelled Game", "total_questions": 1, "questions": []},
+    )
+    db_session.add_all([lobby_game, cancelled_game])
+
+    player_user_id = host_id
+    p1.user_id = player_user_id
+    p_lobby = GamePlayer(
+        id=uuid.uuid4(),
+        session_id=lobby_game.id,
+        user_id=player_user_id,
+        nickname="PlayerInLobby",
+    )
+    db_session.add(p_lobby)
+    await db_session.flush()
+
+    host_claims = {"sub": str(host_id)}
+    hosted_list = await list_games(session=db_session, claims=host_claims)
+    hosted_ids = {item.game_id for item in hosted_list}
+    assert finished_game.id in hosted_ids
+    assert lobby_game.id not in hosted_ids
+    assert cancelled_game.id not in hosted_ids
+
+    player_claims = {"sub": str(player_user_id)}
+    played_list = await get_my_game_history(session=db_session, claims=player_claims)
+    played_ids = {item.game_id for item in played_list}
+    assert finished_game.id in played_ids
+    assert lobby_game.id not in played_ids

@@ -18,14 +18,17 @@ from app.api.deps import (
     get_current_user_claims,
     get_redis,
     get_session,
+    get_token_claims,
     require_permissions,
 )
 from app.core import security
 from app.core.rbac import PermissionCode
+from app.game.enums import GameStatus
 from app.models.ai import AiJob
 from app.models.game import GamePlayer, GameSession, PlayerAnswer
 from app.models.report import GameReport
 from app.models.user import User
+from app.repositories import game_repository
 from app.repositories import user_repository as users_repo
 from app.schemas.games import (
     CreateGameRequest,
@@ -92,7 +95,10 @@ async def list_games(
     stmt = (
         select(GameSession)
         .options(selectinload(GameSession.players))
-        .where(GameSession.host_id == host_id)
+        .where(
+            GameSession.host_id == host_id,
+            GameSession.status == GameStatus.FINISHED.value,
+        )
         .order_by(GameSession.created_at.desc())
     )
     games = (await session.execute(stmt)).scalars().all()
@@ -122,6 +128,55 @@ async def get_game_detail(
     async with session.begin():
         detail = await game_service.get_game_detail(session, redis, game_id=id)
     return GameDetailResponse(**detail)
+
+
+@router.post("/{id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_lobby_game(
+    id: uuid.UUID,
+    session: DbSession,
+    redis: RedisClient,
+    claims: Annotated[dict[str, Any], Depends(require_permissions(PermissionCode.GAME_HOST_OWN))],
+) -> dict[str, str]:
+    """Hủy phòng đấu khi chưa bắt đầu (Host rời phòng từ lobby)."""
+    host_id = uuid.UUID(claims["sub"])
+    async with session.begin():
+        game = await game_repository.get_session_by_id(session, id)
+        if not game:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy trận đấu"
+            )
+        if game.host_id != host_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="Chỉ Host mới có quyền hủy phòng"
+            )
+        if game.status == GameStatus.LOBBY.value:
+            await game_repository.update_session_status(
+                session,
+                id,
+                GameStatus.CANCELLED.value,
+                ended_at=datetime.now(UTC),
+            )
+            await redis.delete(f"pin:{game.pin}", f"game:{id}:state")
+    return {"status": "cancelled"}
+
+
+@router.post("/{id}/leave", status_code=status.HTTP_200_OK)
+async def leave_game(
+    id: uuid.UUID,
+    session: DbSession,
+    redis: RedisClient,
+    claims: Annotated[dict[str, Any], Depends(get_token_claims)],
+) -> dict[str, str]:
+    """Người chơi rời phòng chờ trước khi trận đấu bắt đầu."""
+    async with session.begin():
+        await game_service.leave_lobby_game(
+            session,
+            redis,
+            game_id=id,
+            sub=str(claims.get("sub", "")),
+            token_type=str(claims.get("type", "access")),
+        )
+    return {"status": "left"}
 
 
 @router.get("/{id}/results", response_model=GameResultsResponse)
@@ -348,7 +403,10 @@ async def get_my_game_history(
     stmt = (
         select(GamePlayer, GameSession)
         .join(GameSession, GamePlayer.session_id == GameSession.id)
-        .where(GamePlayer.user_id == user_id)
+        .where(
+            GamePlayer.user_id == user_id,
+            GameSession.status == GameStatus.FINISHED.value,
+        )
         .order_by(GameSession.created_at.desc())
     )
     records = (await session.execute(stmt)).all()

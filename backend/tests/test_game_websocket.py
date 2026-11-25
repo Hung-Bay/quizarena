@@ -755,3 +755,40 @@ def test_demo_page_endpoint():
         assert "QuizArena Live Engine" in resp.text
         assert "Host Điều Khiển" in resp.text
         assert "Người Chơi (Player)" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_admin_joins_other_game_as_player(redis_client):
+    """Khi Admin (hoặc user có quyền game:host_own) tham gia trận của người khác, họ là player, không phải host."""
+    gid = str(uuid.uuid4())
+    hid = str(uuid.uuid4())
+    admin_id = str(uuid.uuid4())
+    player_id = str(uuid.uuid4())
+
+    await setup_test_game_session(
+        redis_client,
+        game_id=gid,
+        host_id=hid,
+        player_id=player_id,
+        player_nickname="AdminPlayer",
+    )
+    await redis_client.hset(f"game:{gid}:user_to_player", admin_id, player_id)
+    await redis_client.hset(f"game:{gid}:nicknames", admin_id, "AdminPlayer")
+
+    ticket = f"ticket_{uuid.uuid4().hex}"
+    data = {
+        "sub": admin_id,
+        "game_id": gid,
+        "roles": ["ADMIN"],
+        "permissions": ["game:host_own", "game:play", "*"],
+        "type": "access",
+    }
+    await redis_client.set(f"ws:ticket:{ticket}", json.dumps(data), ex=30)
+
+    with TestClient(app) as client:
+        with client.websocket_connect(f"/ws/game?ticket={ticket}") as ws:
+            snap = ws.receive_json()
+            assert snap["type"] == "snapshot"
+            assert snap["data"]["is_host"] is False
+            assert snap["data"]["personal"] is not None
+            assert snap["data"]["personal"]["score"] == 0

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from redis.asyncio import Redis
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import security
@@ -408,6 +409,18 @@ async def join_game(
             status_code=400,
         )
 
+    # 5.1. Nếu user đã đăng nhập trước đó từng vào lobby này bằng tên khác -> xóa tên cũ
+    if current_user:
+        prev_pid = await redis.hget(f"game:{game_id}:user_to_player", str(current_user.id))  # type: ignore[misc]
+        if prev_pid:
+            await _remove_lobby_player(
+                session,
+                redis,
+                game_id=game_id,
+                player_id_str=str(prev_pid),
+                user_id_str=str(current_user.id),
+            )
+
     # 6. Kiểm tra giới hạn 500 người chơi (GM-13)
     player_count = await redis.hlen(players_key)  # type: ignore[misc]
     if player_count >= MAX_PLAYERS_PER_GAME:
@@ -509,3 +522,99 @@ async def join_game(
     # Guest Token
     token = security.create_guest_token(game_id=game_id, guest_id=player_id)
     return token, "guest", game_id, player_id, clean_nickname
+
+
+async def _remove_lobby_player(
+    session: AsyncSession,
+    redis: Redis,
+    *,
+    game_id: uuid.UUID,
+    player_id_str: str,
+    user_id_str: str | None = None,
+) -> None:
+    """Xóa dữ liệu người chơi khỏi phòng chờ (Redis & PostgreSQL)."""
+    nickname = await redis.hget(f"game:{game_id}:nicknames", player_id_str)  # type: ignore[misc]
+    pipe = redis.pipeline()
+    if nickname:
+        pipe.hdel(f"game:{game_id}:players", nickname.lower())
+    pipe.zrem(f"game:{game_id}:lb", player_id_str)
+    pipe.hdel(f"game:{game_id}:nicknames", player_id_str)
+    if user_id_str:
+        pipe.hdel(f"game:{game_id}:user_to_player", user_id_str)
+        pipe.hdel(f"game:{game_id}:nicknames", user_id_str)
+    await pipe.execute()
+
+    if hasattr(session, "execute"):
+        try:
+            pid_uuid = uuid.UUID(player_id_str)
+            await session.execute(
+                delete(GamePlayer).where(
+                    GamePlayer.id == pid_uuid,
+                    GamePlayer.session_id == game_id,
+                )
+            )
+        except ValueError:
+            pass
+
+
+async def leave_lobby_game(
+    session: AsyncSession,
+    redis: Redis,
+    *,
+    game_id: uuid.UUID,
+    sub: str,
+    token_type: str = "access",
+) -> None:
+    """Người chơi rời khỏi phòng chờ trước khi trận đấu bắt đầu."""
+    state = await redis.hgetall(f"game:{game_id}:state")  # type: ignore[misc]
+    status = state.get("status") if state else None
+    if status != GameStatus.LOBBY.value:
+        return
+
+    if token_type == "guest" or sub.startswith("guest:"):
+        player_id_str = sub.removeprefix("guest:")
+        user_id_str = None
+    else:
+        user_id_str = sub
+        mapped = await redis.hget(f"game:{game_id}:user_to_player", sub)  # type: ignore[misc]
+        player_id_str = str(mapped) if mapped else None  # type: ignore[assignment]
+
+    if not player_id_str:
+        return
+
+    await _remove_lobby_player(
+        session,
+        redis,
+        game_id=game_id,
+        player_id_str=player_id_str,
+        user_id_str=user_id_str,
+    )
+
+    # Phát thông báo lobby.update để Host cập nhật danh sách ngay lập tức
+    raw_all_players = await redis.hgetall(f"game:{game_id}:players")  # type: ignore[misc]
+    all_players: list[dict[str, str]] = []
+    if raw_all_players:
+        for p_val in raw_all_players.values():
+            try:
+                p_obj = json.loads(p_val)
+                all_players.append(
+                    {
+                        "id": p_obj.get("id", ""),
+                        "nickname": p_obj.get("nickname", "Ẩn danh"),
+                    }
+                )
+            except Exception:
+                pass
+
+    lobby_msg = {
+        "type": WSMessageType.LOBBY_UPDATE.value,
+        "v": 1,
+        "data": {
+            "game_id": str(game_id),
+            "pin": state.get("pin") if state else None,
+            "player_count": len(all_players),
+            "players": all_players,
+            "kicked_player_id": player_id_str,
+        },
+    }
+    await redis.publish(f"game:{game_id}", json.dumps(lobby_msg))
