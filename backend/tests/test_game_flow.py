@@ -59,6 +59,14 @@ class MemoryPipeline:
         self.commands.append((self.redis.zadd, (key, mapping), {}))
         return self
 
+    def hdel(self, key: str, *fields: str) -> MemoryPipeline:
+        self.commands.append((self.redis.hdel, (key, *fields), {}))
+        return self
+
+    def zrem(self, key: str, *members: str) -> MemoryPipeline:
+        self.commands.append((self.redis.zrem, (key, *members), {}))
+        return self
+
     async def execute(self) -> list[Any]:
         results = []
         for func, args, kwargs in self.commands:
@@ -135,6 +143,24 @@ class MemoryRedis:
 
     async def hgetall(self, key: str) -> dict[str, str]:
         return dict(self.hashes.get(key, {}))
+
+    async def hdel(self, key: str, *fields: str) -> int:
+        bucket = self.hashes.get(key, {})
+        count = 0
+        for f in fields:
+            if f in bucket:
+                del bucket[f]
+                count += 1
+        return count
+
+    async def zrem(self, key: str, *members: str) -> int:
+        bucket = self.zsets.get(key, {})
+        count = 0
+        for m in members:
+            if m in bucket:
+                del bucket[m]
+                count += 1
+        return count
 
     async def hlen(self, key: str) -> int:
         return len(self.hashes.get(key, {}))
@@ -686,3 +712,65 @@ class TestJoinGameEndpoint:
         player = players_db.get(uuid.UUID(data["player_id"]))
         assert player is not None
         assert player.user_id == user_id
+
+    def test_join_game_replaces_old_nickname_for_same_user(self) -> None:
+        """Khi user đã đăng nhập bấm Back rồi vào lại lobby với tên mới -> xóa tên cũ, không bị trùng 2 tên."""
+        game_id, pin = self._setup_open_game()
+        user_id = uuid.uuid4()
+
+        user = User(
+            id=user_id,
+            email="back@example.com",
+            display_name="BackUser",
+            password_hash="fake",
+            is_active=True,
+            token_version=1,
+        )
+        users_db[user_id] = user
+
+        user_token = security.create_access_token(
+            user_id=user_id,
+            roles=[RoleName.PLAYER.value],
+            permissions=[PermissionCode.GAME_PLAY.value],
+            token_version=1,
+        )
+
+        # Lần 1: vào bằng tên "gg"
+        r1 = client.post(
+            "/api/v1/games/join",
+            json={"pin": pin, "nickname": "gg"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert r1.status_code == 200
+
+        # Lần 2: bấm Back và vào lại bằng tên "hh"
+        r2 = client.post(
+            "/api/v1/games/join",
+            json={"pin": pin, "nickname": "hh"},
+            headers={"Authorization": f"Bearer {user_token}"},
+        )
+        assert r2.status_code == 200
+
+        # Chỉ còn 1 người chơi là "hh" trong Redis
+        players_map = memory_redis.hashes.get(f"game:{game_id}:players", {})
+        assert "gg" not in players_map
+        assert "hh" in players_map
+        assert len(players_map) == 1
+
+    def test_leave_lobby_game_removes_player(self) -> None:
+        """Người chơi bấm thoát phòng chờ -> xóa khỏi Redis và phát lobby.update."""
+        game_id, pin = self._setup_open_game()
+
+        join_res = client.post("/api/v1/games/join", json={"pin": pin, "nickname": "GuestOne"})
+        assert join_res.status_code == 200
+        guest_token = join_res.json()["token"]
+
+        assert "guestone" in memory_redis.hashes.get(f"game:{game_id}:players", {})
+
+        leave_res = client.post(
+            f"/api/v1/games/{game_id}/leave",
+            headers={"Authorization": f"Bearer {guest_token}"},
+        )
+        assert leave_res.status_code == 200
+        assert leave_res.json()["status"] == "left"
+        assert len(memory_redis.hashes.get(f"game:{game_id}:players", {})) == 0

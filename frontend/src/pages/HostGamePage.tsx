@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { useGameSocket } from "../hooks/useGameSocket";
+import { tokenStore } from "../services/tokenStore";
+import { apiRequest } from "../services/apiClient";
 import {
   ArrowLeft,
   Home,
@@ -55,6 +57,11 @@ export const HostGamePage: React.FC = () => {
   const initialPin = (location.state as { pin?: string } | null)?.pin;
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  useEffect(() => {
+    // Đảm bảo Host luôn dùng Access Token của tài khoản, không bị vướng Guest Token cũ
+    tokenStore.clearGuestToken();
+  }, []);
+
   const {
     state,
     hostStartGame,
@@ -84,7 +91,16 @@ export const HostGamePage: React.FC = () => {
         <div className="flex items-center gap-6">
           {state.status === "lobby" && (
             <button
-              onClick={() => navigate('/quizzes')}
+              onClick={async () => {
+                if (gameId) {
+                  try {
+                    await apiRequest(`/api/v1/games/${gameId}/cancel`, { method: "POST" });
+                  } catch {
+                    // Bỏ qua lỗi nếu phòng đã hủy/kết thúc trước đó
+                  }
+                }
+                navigate('/quizzes');
+              }}
               className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition flex items-center gap-1.5 text-xs font-semibold cursor-pointer"
               title="Rời phòng và quay về Quản lý Quiz"
             >

@@ -174,7 +174,6 @@ async def game_websocket(
 
     game_id = str(ticket_data.get("game_id", ""))
     sub = str(ticket_data.get("sub", ""))
-    permissions = set(ticket_data.get("permissions", []))
 
     # 2. Kiểm tra trạng thái trận từ Redis
     state = await redis.hgetall(f"game:{game_id}:state")  # type: ignore[misc]
@@ -187,9 +186,9 @@ async def game_websocket(
         await ws.close(code=4003, reason="GAME_ENDED")
         return
 
-    # 3. Phân biệt Host vs Player
+    # 3. Phân biệt Host vs Player: Chỉ người tạo trận đấu (khớp host_id) mới là Host
     host_id = state.get("host_id")
-    is_host = ("game:host_own" in permissions) or (host_id == sub)
+    is_host = bool(host_id and host_id == sub)
 
     if is_host:
         client_id = sub

@@ -100,7 +100,7 @@ type Action =
   | { type: "SET_CONNECTION_STATUS"; payload: ConnectionStatus }
   | { type: "SET_ERROR"; payload: string }
   | { type: "APPLY_SNAPSHOT"; payload: any }
-  | { type: "LOBBY_UPDATE"; payload: { playerCount: number; players?: PlayerInfo[] } }
+  | { type: "LOBBY_UPDATE"; payload: { playerCount: number; players?: PlayerInfo[]; kickedPlayerId?: string | null } }
   | { type: "GAME_STARTING"; payload: { countdownS: number } }
   | { type: "QUESTION_START"; payload: QuestionStartData }
   | { type: "ANSWER_ACK"; payload: { accepted: boolean } }
@@ -186,12 +186,17 @@ function gameReducer(state: GameState, action: Action): GameState {
       };
     }
 
-    case "LOBBY_UPDATE":
+    case "LOBBY_UPDATE": {
+      let nextPlayers = action.payload.players ?? state.players;
+      if (action.payload.kickedPlayerId) {
+        nextPlayers = nextPlayers.filter((p) => p.id !== action.payload.kickedPlayerId);
+      }
       return {
         ...state,
         playerCount: action.payload.playerCount,
-        players: action.payload.players ?? state.players,
+        players: nextPlayers,
       };
+    }
 
     case "GAME_STARTING":
       return {
@@ -308,12 +313,12 @@ export function useGameSocket(
   const lobbyBufferRef = useRef<PlayerInfo[] | null>(null);
   const lobbyBatchTimerRef = useRef<number | null>(null);
 
-  // Lấy token xác thực: customToken (guest token) hoặc in-memory access token
+  // Lấy token xác thực: customToken, hoặc in-memory access token, hoặc guest token từ sessionStorage
   const getAuthToken = useCallback(() => {
     if (customToken) return customToken;
-    const guestStored = tokenStore.getGuestToken();
-    if (guestStored) return guestStored;
-    return tokenStore.getAccessToken();
+    const accessToken = tokenStore.getAccessToken();
+    if (accessToken) return accessToken;
+    return tokenStore.getGuestToken();
   }, [customToken]);
 
   // Gửi thông điệp WS an toàn
@@ -433,6 +438,10 @@ export function useGameSocket(
             // Buffer updates để batch render 250ms
             if (env.data.players) {
               lobbyBufferRef.current = env.data.players;
+            } else if (env.data.kicked_player_id && lobbyBufferRef.current) {
+              lobbyBufferRef.current = lobbyBufferRef.current.filter(
+                (p) => p.id !== env.data.kicked_player_id
+              );
             } else if (env.data.new_player) {
               const np = env.data.new_player;
               const newId = np.id || np.player_id || "";
@@ -448,6 +457,7 @@ export function useGameSocket(
                   payload: {
                     playerCount: env.data.player_count,
                     players: lobbyBufferRef.current ?? undefined,
+                    kickedPlayerId: env.data.kicked_player_id,
                   },
                 });
                 lobbyBatchTimerRef.current = null;

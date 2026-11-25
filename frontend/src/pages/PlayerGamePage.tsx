@@ -1,6 +1,8 @@
-import React from "react";
+import React, { useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useGameSocket } from "../hooks/useGameSocket";
+import { tokenStore } from "../services/tokenStore";
+import { apiRequest } from "../services/apiClient";
 import {
   Triangle,
   Diamond,
@@ -11,6 +13,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  LogOut,
 } from "lucide-react";
 
 const OPTION_STYLES = [
@@ -45,8 +48,34 @@ export const PlayerGamePage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const initialPin = (location.state as { pin?: string } | null)?.pin;
+  const [isLeaving, setIsLeaving] = useState(false);
 
   const { state, playerSubmitAnswer } = useGameSocket(gameId || "", null, initialPin);
+
+  const handleLeaveLobby = async () => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    try {
+      if (gameId) {
+        const accessToken = tokenStore.getAccessToken();
+        const guestToken = tokenStore.getGuestToken();
+        const token = accessToken || guestToken;
+        if (accessToken) {
+          await apiRequest(`/api/v1/games/${gameId}/leave`, { method: "POST" });
+        } else if (token) {
+          await fetch(`/api/v1/games/${gameId}/leave`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        }
+      }
+    } catch {
+      // Bỏ qua lỗi mạng khi rời phòng
+    } finally {
+      tokenStore.clearGuestToken();
+      navigate("/join", { replace: true });
+    }
+  };
 
   // Bị kick khỏi phòng
   if (state.connectionStatus === "kicked") {
@@ -134,6 +163,17 @@ export const PlayerGamePage: React.FC = () => {
                   ? "Đã kết nối phòng đấu trực tiếp"
                   : "Đang kết nối WebSocket..."}
               </span>
+            </div>
+
+            <div className="mt-8">
+              <button
+                onClick={handleLeaveLobby}
+                disabled={isLeaving}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-rose-500/15 border border-slate-700 hover:border-rose-500/40 text-slate-300 hover:text-rose-300 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>{isLeaving ? "Đang rời phòng..." : "Thoát phòng chờ"}</span>
+              </button>
             </div>
           </div>
         )}
